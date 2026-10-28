@@ -1,0 +1,60 @@
+{% extends "base_staff.html" %}{% block content %}
+
+<div id="newAlert" style="display:none" class="alert alert-success fw-bold rounded-3 shadow-sm">
+🔔 NEW BOOKING! <span id="newCount">0</span> waiting to approve – <a href="#" onclick="location.reload()" class="alert-link">Refresh Dashboard</a>
+<audio id="beep" src="https://assets.mixkit.co/sfx/preview/mixkit-bell-notification-933.mp3" preload="auto"></audio>
+</div>
+
+<script>
+let lastCount = 0;
+function checkNew(){
+  fetch('/staff/new-count').then(r=>r.json()).then(d=>{
+    document.getElementById('bookedBadge').innerText = d.new_booked;
+    if(lastCount===0) lastCount = d.new_booked;
+    if(d.new_booked > lastCount){
+      document.getElementById('newAlert').style.display='block';
+      document.getElementById('newCount').innerText = d.new_booked;
+      document.getElementById('beep').play().catch(()=>{});
+      // Flash title
+      let orig = document.title;
+      document.title = "🔔 NEW BOOKING! – " + d.new_booked;
+      setTimeout(()=>{ document.title = orig; }, 5000);
+      lastCount = d.new_booked;
+    } else {
+      lastCount = d.new_booked;
+    }
+  }).catch(()=>{});
+}
+// Check every 10 seconds – staff knows instantly, no 50s reload needed
+setInterval(checkNew, 10000);
+checkNew();
+</script>
+
+<h2 class="fw-bold mb-1">Appointments</h2>
+<p class="text-muted small mb-3">Botho University Clinic – Today</p>
+
+<div class="card card-ema p-3">
+<div class="d-flex justify-content-between align-items-center mb-3"><h5 class="fw-bold mb-0">Appointments</h5><a href="/staff/walkin" class="btn btn-outline-dark btn-sm rounded-3">New</a></div>
+<div class="table-responsive"><table class="table align-middle small"><thead class="table-light"><tr><th>PATIENT ID</th><th>PATIENT NAME</th><th>BOOKED DATE</th><th>SERVICE</th><th>STATUS</th><th>APPROVED TIME</th><th>QUEUE</th><th>ACTIONS</th></tr></thead><tbody>
+{% for a in appointments %}
+<tr>
+<td><span class="badge bg-dark rounded-pill">{{ a.patient_code }}</span></td>
+<td>{{ a.full_name }}</td>
+<td><span class="badge bg-light text-dark border">{{ a.preferred_time or (a.created_at[:10] if a.created_at else '-') }}</span></td>
+<td>{{ a.service_name or 'General' }}</td>
+<td>{{ a.status }}</td>
+<td>{% if a.approved_time %}<strong class="text-primary">{{ a.approved_time }}</strong>{% else %}-{% endif %}</td>
+<td>{% if a.queue_number %}<strong>{{ a.queue_number }}</strong>{% else %}-{% endif %}</td>
+<td>
+{% if a.status=='BOOKED' %}
+<form method="post" action="/staff/approve/{{ a.id }}" class="d-flex gap-1"><input type="time" name="approved_time" class="form-control form-control-sm" style="width:95px" required value="09:00"><select name="notify" class="form-select form-select-sm" style="width:70px"><option>Call</option><option>SMS</option></select><button class="btn btn-sm btn-success rounded-3">Approve</button></form>
+{% elif a.status=='APPROVED' %}<form method="post" action="/staff/checkin/{{ a.id }}"><button class="btn btn-sm btn-warning rounded-3">Check-In {{ a.approved_time }}</button></form>
+{% elif a.status=='CHECKED_IN' or a.status=='WAITING' %}<form method="post" action="/staff/call/{{ a.id }}"><button class="btn btn-sm btn-success rounded-3">Call {{ a.queue_number }}</button></form>
+{% elif a.status=='CALLED' %}<form method="post" action="/staff/complete/{{ a.id }}"><button class="btn btn-sm btn-dark rounded-3">Complete</button></form>
+{% else %}Done{% endif %}
+</td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+</div>
+{% endblock %}

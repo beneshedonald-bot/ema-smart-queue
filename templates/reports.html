@@ -1,0 +1,28 @@
+{% extends "base_staff.html" %}{% block content %}
+<h3 class="fw-bold">Clinic Reports – Totals</h3>
+<p class="text-muted small">Botho University Clinic</p>
+
+<div class="row g-3 mt-2">
+<div class="col-md-3"><div class="card card-ema p-3 text-center"><div class="small text-muted">Total Appointments</div><div class="fs-2 fw-bold text-primary">{{ by_status|sum(attribute='c') if by_status else 0 }}</div><div class="small text-success">All time</div></div></div>
+<div class="col-md-3"><div class="card card-ema p-3 text-center"><div class="small text-muted">Approved Today</div><div class="fs-2 fw-bold text-success">{{ by_status|selectattr('status','equalto','APPROVED')|sum(attribute='c') if by_status else 0 }}</div><div class="small text-muted">Ready for check-in</div></div></div>
+<div class="col-md-3"><div class="card card-ema p-3 text-center"><div class="small text-muted">Waiting / Queue</div><div class="fs-2 fw-bold text-warning">{{ by_status|selectattr('status','equalto','WAITING')|sum(attribute='c') + by_status|selectattr('status','equalto','CHECKED_IN')|sum(attribute='c') if by_status else 0 }}</div><div class="small text-warning">In line NO01...</div></div></div>
+<div class="col-md-3"><div class="card card-ema p-3 text-center"><div class="small text-muted">Completed</div><div class="fs-2 fw-bold text-dark">{{ by_status|selectattr('status','equalto','COMPLETED')|sum(attribute='c') if by_status else 0 }}</div><div class="small text-muted">Done</div></div></div>
+</div>
+
+<div class="row g-3 mt-4">
+<div class="col-md-6"><div class="card card-ema p-3"><h6 class="fw-bold">By Status – Totals</h6><table class="table table-sm mb-0 small"><tr><th>Status</th><th class="text-end">Total</th></tr>{% for r in by_status %}<tr><td><span class="badge bg-light text-dark border">{{ r.status }}</span></td><td class="text-end fw-bold">{{ r.c }}</td></tr>{% else %}<tr><td colspan="2" class="text-muted">No data yet</td></tr>{% endfor %}</table></div></div>
+<div class="col-md-6"><div class="card card-ema p-3"><h6 class="fw-bold">By Service – Totals</h6><table class="table table-sm mb-0 small"><tr><th>Service</th><th class="text-end">Total</th></tr>{% for r in by_service %}<tr><td>{{ r.name }}</td><td class="text-end fw-bold">{{ r.c }}</td></tr>{% else %}<tr><td colspan="2" class="text-muted">No data yet</td></tr>{% endfor %}</table></div></div>
+</div>
+
+<div class="card card-ema p-3 mt-4">
+<h6 class="fw-bold">Daily Summary</h6>
+<div class="row text-center mt-3">
+<div class="col"><div class="small text-muted">BOOKED</div><div class="fw-bold fs-4">{{ by_status|selectattr('status','equalto','BOOKED')|sum(attribute='c') if by_status else 0 }}</div></div>
+<div class="col"><div class="small text-muted">APPROVED</div><div class="fw-bold fs-4 text-success">{{ by_status|selectattr('status','equalto','APPROVED')|sum(attribute='c') if by_status else 0 }}</div></div>
+<div class="col"><div class="small text-muted">WAITING</div><div class="fw-bold fs-4 text-warning">{{ by_status|selectattr('status','equalto','WAITING')|sum(attribute='c') if by_status else 0 }}</div></div>
+<div class="col"><div class="small text-muted">CALLED</div><div class="fw-bold fs-4 text-info">{{ by_status|selectattr('status','equalto','CALLED')|sum(attribute='c') if by_status else 0 }}</div></div>
+<div class="col"><div class="small text-muted">COMPLETED</div><div class="fw-bold fs-4">{{ by_status|selectattr('status','equalto','COMPLETED')|sum(attribute='c') if by_status else 0 }}</div></div>
+</div>
+</div>
+
+{% endblock %}

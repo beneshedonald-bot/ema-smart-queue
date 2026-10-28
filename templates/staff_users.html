@@ -1,0 +1,96 @@
+{% extends "base_staff.html" %}
+{% block content %}
+<div class="container py-4">
+  <h3 class="fw-bold" style="color:#002a8a">🔐 Staff User Management</h3>
+  <p class="small text-muted">Logged in as <b>{{ session.username }}</b> ({{ session.role }}) | Passwords are hashed</p>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for msg in messages %}
+        <div class="alert alert-info rounded-3 py-2">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="row mt-3">
+    <!-- Add User -->
+    <div class="col-md-5">
+      <div class="card p-4 shadow-sm mb-3">
+        <h5 class="fw-bold">Add New Staff</h5>
+        <form method="post">
+          <input type="hidden" name="action" value="add">
+          <label class="small fw-bold">Username (lowercase)</label>
+          <input name="username" class="form-control mb-2" required placeholder="e.g. thabo">
+          <label class="small fw-bold">Full Name</label>
+          <input name="name" class="form-control mb-2" required placeholder="e.g. Thabo Mokoena">
+          <label class="small fw-bold">Password</label>
+          <input type="password" name="password" class="form-control mb-2" required>
+          <label class="small fw-bold">Role</label>
+          <select name="role" class="form-select mb-3" required>
+            <option value="reception">Reception</option>
+            <option value="clinician">Clinician</option>
+            <option value="manager">Manager</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button class="btn btn-primary w-100">Create User</button>
+        </form>
+      </div>
+
+      <div class="card p-4 shadow-sm">
+        <h5 class="fw-bold">Reset Password & Unlock</h5>
+        <form method="post">
+          <input type="hidden" name="action" value="reset">
+          <label class="small fw-bold">Username</label>
+          <input name="reset_username" class="form-control mb-2" required>
+          <label class="small fw-bold">New Password</label>
+          <input type="password" name="new_password" class="form-control mb-2" required>
+          <button class="btn btn-warning w-100">Reset & Unlock</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- User List -->
+    <div class="col-md-7">
+      <div class="card p-4 shadow-sm">
+        <h5 class="fw-bold">Current Staff ({{ users|length }})</h5>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover">
+            <thead>
+              <tr><th>Username</th><th>Name</th><th>Role</th><th>Failed</th><th>Lock</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {% for u in users %}
+              <tr>
+                <td><b>{{ u[0] }}</b></td>
+                <td>{{ u[2] }}</td>
+                <td><span class="badge bg-primary">{{ u[1] }}</span></td>
+                <td>{{ u[3] }}</td>
+                <td>{% if u[4] %}<span class="text-danger">Locked</span>{% else %}OK{% endif %}</td>
+                <td>
+                  {% if u[0] != 'admin' %}
+                  <form method="post" onsubmit="return confirm('Delete {{ u[0] }}?')" style="display:inline">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="delete_username" value="{{ u[0] }}">
+                    <button class="btn btn-sm btn-outline-danger">Delete</button>
+                  </form>
+                  {% else %}
+                  <small class="text-muted">Protected</small>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <hr>
+        <small class="text-muted">
+          <b>admin</b> = Everything + manage users<br>
+          <b>manager</b> = All + Reports<br>
+          <b>reception</b> = Approve, Check-in<br>
+          <b>clinician</b> = Call, Complete
+        </small>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

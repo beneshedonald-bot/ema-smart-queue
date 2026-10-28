@@ -1,0 +1,6 @@
+flask
+gunicorn
+psycopg2-binary
+Flask-Mail
+Flask-Bcrypt
+Flask-SQLAlchemy

@@ -1,0 +1,24 @@
+{% extends "base_user.html" %}{% block content %}
+<h3 class="fw-bold">Live Queue</h3>
+<p class="text-muted small">Today: NO01, NO02... – Find your queue number</p>
+<div class="card card-ema p-3 mt-3">
+<div class="table-responsive">
+<table class="table small mb-0">
+<thead><tr><th>Queue No</th><th>Patient ID</th><th>Time</th><th>Status</th></tr></thead>
+<tbody>
+{% for q in queue %}
+<tr>
+<td><strong>{{ q.queue_number }}</strong></td>
+<td><span class="badge bg-dark">{{ q.patient_code }}</span></td>
+<td>{{ q.approved_time or '-' }}</td>
+<td><span class="badge bg-primary">{{ q.status }}</span></td>
+</tr>
+{% else %}
+<tr><td colspan="4" class="text-center text-muted py-3">No queue today</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+<p class="small text-muted mt-2">Your Patient ID (E01DB) is private – use it to know your turn, names not shown for privacy.</p>
+{% endblock %}

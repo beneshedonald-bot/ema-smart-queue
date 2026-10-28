@@ -1,0 +1,28 @@
+{% extends "base_user.html" %}{% block content %}
+<div class="text-center">
+<h1 style="color:#002a8a;font-weight:900;font-size:4.5rem;letter-spacing:-2px" class="mb-1">Ema!</h1>
+<p class="fs-5 text-muted mb-5">Skip the queue. Book in seconds.</p>
+<div class="row justify-content-center g-4">
+<div class="col-md-5"><div class="card card-ema p-4 text-start h-100">
+<div class="icon-circle mb-3"><i class="fa-regular fa-calendar-check"></i></div>
+<h4 class="fw-bold" style="color:#0a1a5a">Book Appointment</h4>
+<p class="text-muted small">Reserve your visit slot in seconds</p>
+<a href="/book" class="btn btn-ema w-100 py-3 mt-2">Book Now</a>
+</div></div>
+<div class="col-md-5"><div class="card card-ema p-4 text-start h-100">
+<div class="icon-circle mb-3"><i class="fa-solid fa-users"></i></div>
+<h4 class="fw-bold" style="color:#0a1a5a">Queue Status</h4>
+<div class="d-flex align-items-center gap-2 mt-1">
+<span class="badge bg-success rounded-circle" style="width:10px;height:10px;padding:0"></span>
+<span class="fs-3 fw-bold" style="color:#0b5bff">{{ queue_count }} in line</span>
+</div>
+<a href="/queue" class="btn btn-outline-primary w-100 py-3 mt-2 rounded-3">Check Queue</a>
+</div></div>
+</div>
+<div class="d-flex justify-content-center gap-4 mt-5 text-muted small">
+<div><i class="fa-solid fa-shield-halved me-1"></i> No standing</div>
+<div><i class="fa-solid fa-rotate me-1"></i> Real-time queue</div>
+<div><i class="fa-solid fa-lock me-1"></i> Secure</div>
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base_user.html" %}
+{% block content %}
+<h3 class="fw-bold">Booking Status</h3>
+<div class="card card-ema p-4 mt-3">
+{% if appt %}
+<p><b>Facility:</b> {{ appt.facility_name or 'Botho University Clinic' }}</p>
+<p><b>Service:</b> {{ appt.service_name or 'General Consultation' }}</p>
+<p><b>Patient:</b> {{ appt.full_name }}</p>
+<p><b>Patient ID:</b> {{ appt.patient_code }}</p>
+<p><b>Status:</b> {{ appt.status }}</p>
+{% if appt.approved_time %}
+<p><b>Approved Time:</b> {{ appt.approved_time }}</p>
+{% endif %}
+{% else %}
+<p>Not found</p>
+{% endif %}
+</div>
+{% endblock %}

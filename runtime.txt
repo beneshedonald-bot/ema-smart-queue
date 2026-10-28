@@ -1,0 +1,5 @@
+Flask
+Flask-Mail
+psycopg2-binary
+gunicorn
+Werkzeug
