@@ -7,12 +7,20 @@ from werkzeug.security import check_password_hash
 from functools import wraps
 from database.database import get_conn, init_db, ph
 
+# SendGrid for Render live (HTTP API - not blocked)
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail as SGMail
+    SENDGRID_AVAILABLE = True
+except:
+    SENDGRID_AVAILABLE = False
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "ema-secret-key-2024")
 app.config['MAIL_SERVER'] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
 app.config['MAIL_PORT'] = int(os.environ.get("MAIL_PORT", 587))
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.environ.get("MAIL_USERNAME", "emaqms@gmail.com")
+app.config['MAIL_USERNAME'] = os.environ.get("MAIL_USERNAME", "emaqms42@gmail.com")
 app.config['MAIL_PASSWORD'] = os.environ.get("MAIL_PASSWORD", "")
 app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
 mail = Mail(app)
@@ -25,33 +33,66 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
+# ========== EMAIL FUNCTIONS (SendGrid + Gmail) ==========
 def send_email_async(app_obj, msg):
     with app_obj.app_context():
         try:
             mail.send(msg)
-            print(f"Email OK to {msg.recipients}")
+            print(f"Email OK via Gmail to {msg.recipients}")
         except Exception as e:
             print(f"Email FAILED: {e}")
 
+def send_via_sendgrid(to_emails, subject, body):
+    if not SENDGRID_AVAILABLE:
+        return False, "SendGrid not installed"
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    if not api_key:
+        return False, "No SENDGRID_API_KEY - using Gmail fallback"
+    if isinstance(to_emails, str):
+        to_emails = [to_emails]
+    from_email = os.environ.get("MAIL_USERNAME", "emaqms42@gmail.com")
+    message = SGMail(
+        from_email=from_email,
+        to_emails=to_emails,
+        subject=subject,
+        plain_text_content=body
+    )
+    try:
+        sg = SendGridAPIClient(api_key)
+        response = sg.send(message)
+        print(f"Email OK via SendGrid to {to_emails} status {response.status_code}")
+        return True, f"SendGrid {response.status_code}"
+    except Exception as e:
+        print(f"SendGrid FAILED: {e}")
+        return False, str(e)
+
 def send_approval_email(to_email, patient_name, approved_time, facility):
     if not to_email or "@" not in str(to_email): return False, "No email"
+    subject = f"Appointment APPROVED - {facility}"
+    body = f"Hi {patient_name},\n\nYour appointment at {facility} is APPROVED.\nApproved Time: {approved_time}\nFacility: {facility}\nPlease arrive 10 min early.\n\nEma! Smart Queue\n"
+    ok, _ = send_via_sendgrid(to_email, subject, body)
+    if ok: return True, "SendGrid"
     try:
-        msg = Message(f"Appointment APPROVED - {facility}", recipients=[to_email])
-        msg.body = f"Hi {patient_name},\n\nYour appointment at {facility} is APPROVED.\nApproved Time: {approved_time}\nFacility: {facility}\nPlease arrive 10 min early.\n\nEma! Smart Queue\n"
+        msg = Message(subject, recipients=[to_email])
+        msg.body = body
         threading.Thread(target=send_email_async, args=(app, msg), daemon=True).start()
-        return True, "queued"
+        return True, "queued Gmail"
     except Exception as e:
-        print(f"Approval fail: {e}"); return False, str(e)
+        print(f"Approval email fail: {e}"); return False, str(e)
 
 def send_call_email(to_email, patient_name, queue_no, facility):
     if not to_email or "@" not in str(to_email): return False, "No email"
+    subject = f"Now Calling – Queue {queue_no} – {facility}"
+    body = f"Hi {patient_name},\nYou are now CALLED at {facility}.\nQueue No: {queue_no}\nPlease proceed now.\n\nEma! Smart Queue\n"
+    ok, _ = send_via_sendgrid(to_email, subject, body)
+    if ok: return True, "SendGrid"
     try:
-        msg = Message(f"Now Calling – Queue {queue_no} – {facility}", recipients=[to_email])
-        msg.body = f"Hi {patient_name},\nYou are now CALLED at {facility}.\nQueue No: {queue_no}\nPlease proceed now.\n\nEma! Smart Queue\n"
+        msg = Message(subject, recipients=[to_email])
+        msg.body = body
         threading.Thread(target=send_email_async, args=(app, msg), daemon=True).start()
-        return True, "queued"
+        return True, "queued Gmail"
     except Exception as e:
-        print(f"Call fail: {e}"); return False, str(e)
+        print(f"Call email fail: {e}"); return False, str(e)
 
 def send_staff_new_booking_email(patient_name, patient_id, booked_date, service):
     try:
@@ -59,18 +100,25 @@ def send_staff_new_booking_email(patient_name, patient_id, booked_date, service)
         try:
             cur.execute("SELECT email FROM staff_notify_emails")
             rows = cur.fetchall()
-            staff_emails = [r[0] for r in rows] if rows else ["emaqms@gmail.com"]
-        except: staff_emails = ["emaqms@gmail.com"]
+            staff_emails = [r[0] for r in rows] if rows else ["emaqms42@gmail.com"]
+        except: staff_emails = ["emaqms42@gmail.com"]
         conn.close()
-        if not staff_emails: staff_emails = ["emaqms@gmail.com"]
-        msg = Message(f"NEW BOOKING – {patient_name} – {patient_id} – {booked_date}", recipients=staff_emails)
-        msg.body = f"New patient booked\nPatient: {patient_name}\nID: {patient_id}\nDate: {booked_date}\nService: {service}\nApprove: https://ema-smart-queue.onrender.com/staff/login\n\nEma! Smart Queue\n"
+        if not staff_emails: staff_emails = ["emaqms42@gmail.com"]
+        subject = f"NEW BOOKING – {patient_name} – {patient_id} – {booked_date}"
+        body = f"New patient booked\nPatient: {patient_name}\nID: {patient_id}\nDate: {booked_date}\nService: {service}\nApprove: https://ema-smart-queue.onrender.com/staff/login\n\nEma! Smart Queue\n"
+        ok, _ = send_via_sendgrid(staff_emails, subject, body)
+        if ok:
+            print(f"Staff notify via SendGrid to {staff_emails}")
+            return True
+        msg = Message(subject, recipients=staff_emails)
+        msg.body = body
         threading.Thread(target=send_email_async, args=(app, msg), daemon=True).start()
-        print(f"Staff notify to {staff_emails}")
+        print(f"Staff notify via Gmail to {staff_emails}")
         return True
     except Exception as e:
         print(f"Staff notify failed: {e}"); return False
 
+# ========== ROUTES ==========
 @app.route("/")
 def home_user():
     conn = get_conn(); cur = conn.cursor()
