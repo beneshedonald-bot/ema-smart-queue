@@ -1,0 +1,32 @@
+{% extends "base_staff.html" %}{% block content %}
+{% extends "base_staff.html" %}{% block content %}
+{% if session.get('role') != 'admin' %}
+<div class="card card-ema p-5 text-center mt-4">
+<h3 class="fw-bold text-danger">🔒 Admin Only</h3>
+<p class="text-muted">Only admin can manage staff emails. You are logged in as {{ session.get('role') }}.</p>
+<a href="/staff/dashboard" class="btn btn-dark rounded-3">Back to Dashboard</a>
+</div>
+{% else %}
+<h3 class="fw-bold">Staff Notification Emails</h3>
+<p class="text-muted small">Admin can add emails – staff gets notified on new booking. Default: emaqms@gmail.com</p>
+
+<div class="card card-ema p-3 mt-3">
+<form method="post" class="row g-2">
+<div class="col-md-6"><input type="email" name="email" class="form-control" placeholder="reception@bothouniversity.ac.bw" required></div>
+<div class="col-md-3"><select name="role" class="form-select"><option>reception</option><option>clinician</option><option>manager</option><option>admin</option></select></div>
+<div class="col-md-3"><button class="btn btn-dark w-100 rounded-3">Add Email</button></div>
+</form>
+</div>
+
+<div class="card card-ema p-3 mt-3">
+<table class="table small"><tr><th>Email</th><th>Role</th><th>Action</th></tr>
+{% for e in emails %}
+<tr><td>{{ e.email }}</td><td><span class="badge bg-light text-dark border">{{ e.role }}</span></td>
+<td><form method="post" action="/staff/emails/delete/{{ e.id }}"><button class="btn btn-sm btn-outline-danger rounded-3">Remove</button></form></td></tr>
+{% else %} 
+{% endfor %}
+</table>
+</div>
+
+{% endif %}
+{% endblock %}

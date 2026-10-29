@@ -1,459 +1,301 @@
-import os
-import uuid
-import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from database.database import get_conn, init_db, is_postgres
+import os, uuid, datetime, threading
+from dotenv import load_dotenv
+load_dotenv()
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_mail import Mail, Message
-from datetime import timedelta, datetime as dt
 from werkzeug.security import check_password_hash
 from functools import wraps
+from database.database import get_conn, init_db, ph
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get("SECRET_KEY", "ema-final-secure-2026")
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
-app.config['MAIL_SERVER'] = 'smtp.gmail.com'
-app.config['MAIL_PORT'] = 587
+app.secret_key = os.environ.get("SECRET_KEY", "ema-secret-key-2024")
+app.config['MAIL_SERVER'] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+app.config['MAIL_PORT'] = int(os.environ.get("MAIL_PORT", 587))
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = os.environ.get("MAIL_USERNAME", "emaqms@gmail.com")
-app.config['MAIL_PASSWORD'] = os.environ.get("MAIL_PASSWORD", "gzah hfra zthe kksg")
+app.config['MAIL_PASSWORD'] = os.environ.get("MAIL_PASSWORD", "")
 app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
 mail = Mail(app)
-
-try:
-    init_db()
-except Exception as e:
-    print(f"DB init: {e}")
-
-def ph(sqlite_q, pg_q):
-    return pg_q if is_postgres() else sqlite_q
-
-def get_initials(full_name):
-    parts = [p for p in full_name.strip().split() if p]
-    if len(parts) >= 2:
-        return (parts[0][0] + parts[-1][0]).upper()
-    elif parts:
-        return parts[0][:2].upper()
-    return "XX"
-
-def generate_ema_code(full_name, cur):
-    initials = get_initials(full_name)
-    try:
-        cur.execute("SELECT COUNT(*) FROM patients")
-        count = cur.fetchone()[0] + 1
-    except:
-        count = 1
-    # Make sure code is unique
-    for i in range(count, count + 100):
-        code = f"E{i:02d}{initials}" if i < 100 else f"E{i}{initials}"
-        try:
-            if is_postgres():
-                cur.execute("SELECT id FROM patients WHERE id=%s", (code,))
-            else:
-                cur.execute("SELECT id FROM patients WHERE id=?", (code,))
-            if not cur.fetchone():
-                return code
-        except:
-            return code
-    return f"E{count:02d}{initials}"
-
-def generate_queue_no(cur):
-    today = dt.now().strftime("%Y-%m-%d")
-    try:
-        if is_postgres():
-            cur.execute("SELECT COUNT(*) FROM queue WHERE DATE(created_at)=%s", (today,))
-        else:
-            cur.execute("SELECT COUNT(*) FROM queue WHERE DATE(created_at)=?", (today,))
-        count = cur.fetchone()[0] + 1
-    except:
-        count = 1
-    return f"NO{count:02d}"
 
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if "username" not in session:
-            flash("Please login first")
-            return redirect(url_for("staff_login"))
-        session["last_activity"] = dt.now().isoformat()
+        if 'user_id' not in session:
+            return redirect(url_for('staff_login'))
         return f(*args, **kwargs)
     return decorated
 
-def role_required(*allowed_roles):
-    def decorator(f):
-        @wraps(f)
-        def decorated(*args, **kwargs):
-            if "role" not in session:
-                return redirect(url_for("staff_login"))
-            if session["role"] not in allowed_roles and session["role"] != "admin":
-                flash("Access denied")
-                return redirect(url_for("staff_dashboard"))
-            return f(*args, **kwargs)
-        return decorated
-    return decorator
+def send_email_async(app_obj, msg):
+    with app_obj.app_context():
+        try:
+            mail.send(msg)
+            print(f"Email OK to {msg.recipients}")
+        except Exception as e:
+            print(f"Email FAILED: {e}")
 
 def send_approval_email(to_email, patient_name, approved_time, facility):
-    if not to_email or "@" not in str(to_email):
-        return False, "No email"
+    if not to_email or "@" not in str(to_email): return False, "No email"
     try:
         msg = Message(f"Appointment APPROVED - {facility}", recipients=[to_email])
-        msg.body = f"Hi {patient_name},\n\nYour appointment at {facility} is APPROVED.\n\nApproved Time: {approved_time}\nFacility: {facility}\n\nPlease arrive 10 minutes early.\n\nEma! Smart Queue\n"
-        mail.send(msg)
-        return True, f"Email sent to {to_email}"
+        msg.body = f"Hi {patient_name},\n\nYour appointment at {facility} is APPROVED.\nApproved Time: {approved_time}\nFacility: {facility}\nPlease arrive 10 min early.\n\nEma! Smart Queue\n"
+        threading.Thread(target=send_email_async, args=(app, msg), daemon=True).start()
+        return True, "queued"
     except Exception as e:
-        print(f"Email failed: {e}")
-        return False, str(e)
+        print(f"Approval fail: {e}"); return False, str(e)
 
 def send_call_email(to_email, patient_name, queue_no, facility):
-    if not to_email or "@" not in str(to_email):
-        return False, "No email"
+    if not to_email or "@" not in str(to_email): return False, "No email"
     try:
         msg = Message(f"Now Calling – Queue {queue_no} – {facility}", recipients=[to_email])
-        msg.body = f"Hi {patient_name},\n\nYou are now being CALLED at {facility}.\n\nQueue No: {queue_no}\nFacility: {facility}\n\nPlease proceed to consultation room immediately.\n\nEma! Smart Queue\n"
-        mail.send(msg)
-        return True, f"Call email sent to {to_email}"
+        msg.body = f"Hi {patient_name},\nYou are now CALLED at {facility}.\nQueue No: {queue_no}\nPlease proceed now.\n\nEma! Smart Queue\n"
+        threading.Thread(target=send_email_async, args=(app, msg), daemon=True).start()
+        return True, "queued"
     except Exception as e:
-        print(f"Call email failed: {e}")
-        return False, str(e)
+        print(f"Call fail: {e}"); return False, str(e)
+
+def send_staff_new_booking_email(patient_name, patient_id, booked_date, service):
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        try:
+            cur.execute("SELECT email FROM staff_notify_emails")
+            rows = cur.fetchall()
+            staff_emails = [r[0] for r in rows] if rows else ["emaqms@gmail.com"]
+        except: staff_emails = ["emaqms@gmail.com"]
+        conn.close()
+        if not staff_emails: staff_emails = ["emaqms@gmail.com"]
+        msg = Message(f"NEW BOOKING – {patient_name} – {patient_id} – {booked_date}", recipients=staff_emails)
+        msg.body = f"New patient booked\nPatient: {patient_name}\nID: {patient_id}\nDate: {booked_date}\nService: {service}\nApprove: https://ema-smart-queue.onrender.com/staff/login\n\nEma! Smart Queue\n"
+        threading.Thread(target=send_email_async, args=(app, msg), daemon=True).start()
+        print(f"Staff notify to {staff_emails}")
+        return True
+    except Exception as e:
+        print(f"Staff notify failed: {e}"); return False
 
 @app.route("/")
 def home_user():
     conn = get_conn(); cur = conn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM queue WHERE status IN ('WAITING','CALLED')")
-        cnt = cur.fetchone()[0]
-    except:
-        cnt = 0
+        cur.execute("SELECT COUNT(*) FROM queue WHERE status!='COMPLETED' AND date(created_at)=date('now','localtime')")
+        qcount = cur.fetchone()[0]
+    except: qcount = 0
     conn.close()
-    return render_template("home_user.html", queue_count=cnt)
+    return render_template("home_user.html", queue_count=qcount)
 
 @app.route("/book", methods=["GET", "POST"])
 def book():
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT * FROM facilities"); facilities = cur.fetchall()
     cur.execute("SELECT * FROM services"); services = cur.fetchall()
-    if request.method == "POST":
-        full_name = request.form.get("full_name", "").strip()
-        phone = request.form.get("phone", "").strip()
-        email = request.form.get("email", "").strip()
+    if request.method=="POST":
+        full_name = request.form.get("full_name","").strip()
+        phone = request.form.get("phone","").strip()
+        email = request.form.get("email","").strip().lower()
+        preferred_date = request.form.get("preferred_date","").strip() or request.form.get("date","").strip()
         facility_id = request.form.get("facility_id")
         service_id = request.form.get("service_id")
-        preferred_date = request.form.get("date", "").strip()  # e.g. 2026-10-29
-        # PERMANENT ID LOGIC: Reuse ONLY if full_name + phone + email ALL same
-        existing_id = None
-        try:
-            if full_name and phone and email:
-                cur.execute(ph("SELECT id FROM patients WHERE full_name=? AND phone=? AND email=?",
-                               "SELECT id FROM patients WHERE full_name=%s AND phone=%s AND email=%s"),
-                            (full_name, phone, email))
-                r = cur.fetchone()
-                if r:
-                    existing_id = r["id"] if isinstance(r, dict) else r[0]
-        except Exception as e:
-            print(f"Lookup error: {e}")
-
+        if not full_name or not preferred_date:
+            flash("Name and date required"); conn.close()
+            return render_template("book.html", facilities=facilities, services=services)
         now = datetime.datetime.now().isoformat()
-        if existing_id:
-            patient_id = existing_id
-            print(f"Reusing existing patient {patient_id}")
+        cur.execute(ph("SELECT id FROM patients WHERE full_name=? AND phone=? AND email=?", "SELECT id FROM patients WHERE full_name=%s AND phone=%s AND email=%s"), (full_name, phone, email))
+        row = cur.fetchone()
+        if row: patient_id = row[0]
         else:
-            patient_id = generate_ema_code(full_name, cur)
-            cur.execute(ph("INSERT INTO patients VALUES (?,?,?,?,?)",
-                           "INSERT INTO patients VALUES (%s,%s,%s,%s,%s)"),
-                        (patient_id, full_name, phone, email, now))
-            print(f"New patient {patient_id}")
-
+            cur.execute("SELECT COUNT(*) FROM patients"); count = cur.fetchone()[0]
+            patient_id = f"E{count+1:02d}DB"
+            cur.execute(ph("INSERT INTO patients VALUES (?,?,?,?,?)", "INSERT INTO patients VALUES (%s,%s,%s,%s,%s)"), (patient_id, full_name, phone, email, now))
         appt_id = str(uuid.uuid4())
-        cur.execute(ph("INSERT INTO appointments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                       "INSERT INTO appointments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
-                    (appt_id, patient_id, facility_id, service_id, preferred_date, "BOOKED", "ONLINE", now, None, None, None, None, now, None, None, None))
-        cur.execute(ph("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?,?)",
-                       "INSERT INTO audit VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
-                    (str(uuid.uuid4()), "BOOKED", appt_id, full_name, full_name, None, "BOOKED", now, f"PatientID:{patient_id}"))
-        conn.commit(); conn.close()
+        cur.execute(ph("INSERT INTO appointments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", "INSERT INTO appointments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (appt_id, patient_id, facility_id, service_id, preferred_date, "BOOKED", "ONLINE", now, None, None, None, None, now, None, None, None))
+        cur.execute(ph("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?,?)", "INSERT INTO audit VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (str(uuid.uuid4()), "BOOK", appt_id, patient_id, "patient", None, "BOOKED", now, f"Booked {preferred_date}"))
+        try: conn.commit()
+        except: conn.rollback()
+        try: send_staff_new_booking_email(full_name, patient_id, preferred_date, "General")
+        except Exception as e: print(f"Staff notify error: {e}")
+        conn.close()
         return redirect(url_for("status_view", appt_id=appt_id))
     conn.close()
     return render_template("book.html", facilities=facilities, services=services)
 
-@app.route("/queue")
-def queue_public():
-    conn = get_conn(); cur = conn.cursor()
-    try:
-        if is_postgres():
-            cur.execute("SELECT q.queue_number, p.full_name, p.id as patient_code, q.status, a.approved_time FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE q.status IN ('WAITING','CALLED') AND DATE(q.created_at)=CURRENT_DATE ORDER BY q.created_at")
-        else:
-            cur.execute("SELECT q.queue_number, p.full_name, p.id as patient_code, q.status, a.approved_time FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE q.status IN ('WAITING','CALLED') AND DATE(q.created_at)=DATE('now') ORDER BY q.created_at")
-        rows = cur.fetchall()
-    except:
-        rows = []
-    conn.close()
-    return render_template("queue_public.html", queue=rows)
-
 @app.route("/status/<appt_id>")
 def status_view(appt_id):
     conn = get_conn(); cur = conn.cursor()
-    cur.execute(ph("SELECT a.*, p.full_name, p.id as patient_code, s.name as service_name, f.name as facility_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN services s ON a.service_id=s.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=?",
-                   "SELECT a.*, p.full_name, p.id as patient_code, s.name as service_name, f.name as facility_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN services s ON a.service_id=s.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=%s"), (appt_id,))
-    row = cur.fetchone()
-    conn.close()
-    return render_template("status.html", appt=row, appt_id=appt_id)
+    cur.execute(ph("SELECT a.*, p.full_name, p.phone, p.email, p.id as patient_code, f.name as facility_name, s.name as service_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id LEFT JOIN services s ON a.service_id=s.id WHERE a.id=?", "SELECT a.*, p.full_name, p.phone, p.email, p.id as patient_code, f.name as facility_name, s.name as service_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id LEFT JOIN services s ON a.service_id=s.id WHERE a.id=%s"), (appt_id,))
+    appt = cur.fetchone(); conn.close()
+    if not appt: flash("Not found"); return redirect(url_for("home_user"))
+    return render_template("status.html", appt=appt)
 
-@app.route("/staff/login", methods=["GET", "POST"])
+@app.route("/queue")
+def queue_public():
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(ph("SELECT q.queue_number, q.status, q.created_at, a.approved_time, p.id as patient_code FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE date(a.preferred_date)=date('now','localtime') AND q.status!='COMPLETED' ORDER BY q.created_at", "SELECT q.queue_number, q.status, q.created_at, a.approved_time, p.id as patient_code FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE a.preferred_date::date=CURRENT_DATE AND q.status!='COMPLETED' ORDER BY q.created_at"))
+    queue = cur.fetchall(); conn.close()
+    return render_template("queue_public.html", queue=queue)
+
+@app.route("/staff/login", methods=["GET","POST"])
 def staff_login():
-    if request.method == "POST":
-        username = request.form.get("username").strip().lower()
-        password = request.form.get("password")
+    if request.method=="POST":
+        username = request.form.get("username","").strip(); password = request.form.get("password","")
         conn = get_conn(); cur = conn.cursor()
         cur.execute(ph("SELECT * FROM users WHERE username=?", "SELECT * FROM users WHERE username=%s"), (username,))
         user = cur.fetchone()
-        if user:
-            stored_hash = user["password"] if isinstance(user, dict) else user[2]
+        if not user: flash("Invalid username"); conn.close(); return render_template("staff_login.html")
+        locked_until = user[5]
+        if locked_until:
             try:
-                valid = check_password_hash(stored_hash, password)
-            except:
-                valid = (stored_hash == password)
-            if valid:
-                cur.execute(ph("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username=?",
-                               "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username=%s"), (username,))
-                conn.commit()
-                session["username"] = user["username"] if isinstance(user, dict) else user[1]
-                session["role"] = user["role"] if isinstance(user, dict) else user[3]
-                session["last_activity"] = dt.now().isoformat()
-                session.permanent = True
-                conn.close()
-                return redirect(url_for("staff_dashboard"))
-            else:
-                flash("Invalid password")
+                lt = datetime.datetime.fromisoformat(locked_until)
+                if datetime.datetime.now() < lt: flash(f"Locked until {locked_until}"); conn.close(); return render_template("staff_login.html")
+            except: pass
+        if check_password_hash(user[2], password):
+            cur.execute(ph("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username=?", "UPDATE users SET failed_attempts=0, locked_until=NULL WHERE username=%s"), (username,)); conn.commit()
+            session['user_id']=user[0]; session['username']=user[1]; session['role']=user[3]; conn.close()
+            return redirect(url_for('staff_dashboard'))
         else:
-            flash("Invalid username")
-        conn.close()
+            failed = (user[4] or 0)+1
+            if failed>=5:
+                lock_time = (datetime.datetime.now()+datetime.timedelta(minutes=15)).isoformat()
+                cur.execute(ph("UPDATE users SET failed_attempts=?, locked_until=? WHERE username=?", "UPDATE users SET failed_attempts=%s, locked_until=%s WHERE username=%s"), (failed, lock_time, username)); flash("Locked 15 min")
+            else: cur.execute(ph("UPDATE users SET failed_attempts=? WHERE username=?", "UPDATE users SET failed_attempts=%s WHERE username=%s"), (failed, username)); flash(f"Invalid {failed}/5")
+            conn.commit(); conn.close(); return render_template("staff_login.html")
     return render_template("staff_login.html")
+
+@app.route("/staff/logout")
+def staff_logout(): session.clear(); return redirect(url_for('staff_login'))
 
 @app.route("/staff/dashboard")
 @login_required
 def staff_dashboard():
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT a.*, p.full_name, p.id as patient_code, s.name as service_name, f.name as facility_name, q.queue_number FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN services s ON a.service_id=s.id LEFT JOIN facilities f ON a.facility_id=f.id LEFT JOIN queue q ON q.appointment_id=a.id ORDER BY a.created_at DESC")
-    appts = cur.fetchall()
-    timetable = []; booked_times = []
-    try:
-        if is_postgres():
-            cur.execute("SELECT a.approved_time, p.full_name, p.id as patient_code FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED') AND DATE(a.approved_at)=CURRENT_DATE AND a.approved_time IS NOT NULL ORDER BY a.approved_time")
-        else:
-            cur.execute("SELECT a.approved_time, p.full_name, p.id as patient_code FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED') AND DATE(a.approved_at)=DATE('now') AND a.approved_time IS NOT NULL ORDER BY a.approved_time")
-        timetable = cur.fetchall()
-        booked_times = [r["approved_time"] if isinstance(r, dict) else r[0] for r in timetable]
-    except:
-        pass
-    conn.close()
-    return render_template("staff_dashboard.html", appointments=appts, total_today=len(appts), timetable=timetable, booked_times=booked_times)
- 
+    cur.execute(ph("SELECT a.id, a.status, a.preferred_date as preferred_time, a.created_at, a.approved_time, q.queue_number, p.id as patient_code, p.full_name, s.name as service_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN queue q ON q.appointment_id=a.id LEFT JOIN services s ON a.service_id=s.id WHERE a.status!='COMPLETED' ORDER BY CASE a.status WHEN 'BOOKED' THEN 1 WHEN 'APPROVED' THEN 2 WHEN 'CHECKED_IN' THEN 3 WHEN 'CALLED' THEN 4 ELSE 5 END, a.created_at DESC", "SELECT a.id, a.status, a.preferred_date as preferred_time, a.created_at, a.approved_time, q.queue_number, p.id as patient_code, p.full_name, s.name as service_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN queue q ON q.appointment_id=a.id LEFT JOIN services s ON a.service_id=s.id WHERE a.status!='COMPLETED' ORDER BY CASE a.status WHEN 'BOOKED' THEN 1 WHEN 'APPROVED' THEN 2 WHEN 'CHECKED_IN' THEN 3 WHEN 'CALLED' THEN 4 ELSE 5 END, a.created_at DESC"))
+    appointments = cur.fetchall(); conn.close()
+    return render_template("staff_dashboard.html", appointments=appointments)
+
 @app.route("/staff/new-count")
 @login_required
 def new_count():
     conn = get_conn(); cur = conn.cursor()
-    try:
-        cur.execute("SELECT COUNT(*) FROM appointments WHERE status='BOOKED'")
-        new_booked = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM appointments WHERE DATE(created_at)=DATE('now') OR DATE(created_at)=CURRENT_DATE")
-        today_total = cur.fetchone()[0]
-    except:
-        new_booked = 0
-        today_total = 0
-    conn.close()
-    return {"new_booked": new_booked, "today_total": today_total}
+    cur.execute("SELECT COUNT(*) FROM appointments WHERE status='BOOKED'")
+    count = cur.fetchone()[0]; conn.close()
+    return jsonify({"new_booked": count, "count": count})
 
 @app.route("/staff/approve/<appt_id>", methods=["POST"])
 @login_required
-@role_required("reception", "clinician", "manager", "admin")
 def approve(appt_id):
-    approved_time = request.form.get("approved_time", "09:00")
-    notify = request.form.get("notify", "Call")
-    now = datetime.datetime.now().isoformat()
     conn = get_conn(); cur = conn.cursor()
-    # Clash check
     try:
-        if is_postgres():
-            cur.execute("SELECT p.full_name FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.approved_time=%s AND DATE(a.approved_at)=CURRENT_DATE AND a.status!='COMPLETED' AND a.id!=%s", (approved_time, appt_id))
-        else:
-            cur.execute("SELECT p.full_name FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.approved_time=? AND DATE(a.approved_at)=DATE('now') AND a.status!='COMPLETED' AND a.id!=?", (approved_time, appt_id))
-        clash = cur.fetchone()
-        if clash:
-            cname = clash["full_name"] if isinstance(clash, dict) else clash[0]
-            flash(f"CLASH: {approved_time} taken by {cname}")
-            conn.close()
-            return redirect(url_for("staff_dashboard"))
-    except:
-        pass
-    cur.execute(ph("UPDATE appointments SET status='APPROVED', approved_time=?, approved_at=?, notification_sent=? WHERE id=?",
-                   "UPDATE appointments SET status='APPROVED', approved_time=%s, approved_at=%s, notification_sent=%s WHERE id=%s"), (approved_time, now, notify, appt_id))
-    # Email approval – restored
-    try:
-        cur.execute(ph("SELECT p.full_name, p.email, f.name FROM patients p JOIN appointments a ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=?",
-                       "SELECT p.full_name, p.email, f.name FROM patients p JOIN appointments a ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=%s"), (appt_id,))
-        info = cur.fetchone()
-        if info:
-            pname = info["full_name"] if isinstance(info, dict) else info[0]
-            email = info["email"] if isinstance(info, dict) else info[1]
-            fname = info["name"] if isinstance(info, dict) else info[2] if len(info) > 2 else "Botho University Clinic"
-            if isinstance(info, dict):
-                fname = info.get("name") or "Botho University Clinic"
-            sent, msg = send_approval_email(email, pname, approved_time, fname)
-            detail = f"Time {approved_time} via {notify} - {msg}"
-        else:
-            detail = f"Time {approved_time}"
+        approved_time = request.form.get("approved_time","09:00")
+        cur.execute(ph("SELECT a.*, p.full_name, p.email FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.id=?", "SELECT a.*, p.full_name, p.email FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.id=%s"), (appt_id,))
+        if not cur.fetchone(): flash("Not found"); conn.close(); return redirect(url_for('staff_dashboard'))
+        now = datetime.datetime.now().isoformat()
+        cur.execute(ph("UPDATE appointments SET status='APPROVED', approved_time=?, approved_at=? WHERE id=?", "UPDATE appointments SET status='APPROVED', approved_time=%s, approved_at=%s WHERE id=%s"), (approved_time, now, appt_id))
+        cur.execute(ph("SELECT COUNT(*) FROM queue WHERE date(created_at)=date('now','localtime')", "SELECT COUNT(*) FROM queue WHERE created_at::date=CURRENT_DATE")); qcount = cur.fetchone()[0]
+        queue_no = f"NO{qcount+1:02d}"; qid = str(uuid.uuid4())
+        cur.execute(ph("INSERT INTO queue VALUES (?,?,?,?,?,?)", "INSERT INTO queue VALUES (%s,%s,%s,%s,%s,%s)"), (qid, appt_id, queue_no, "WAITING", now, None))
+        cur.execute(ph("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?,?)", "INSERT INTO audit VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (str(uuid.uuid4()), "APPROVE", appt_id, queue_no, session.get('username'), "BOOKED", "APPROVED", now, f"Approved {approved_time}"))
+        conn.commit()
+        try:
+            conn2 = get_conn(); c2 = conn2.cursor()
+            c2.execute(ph("SELECT p.email, p.full_name FROM patients p JOIN appointments a ON a.patient_id=p.id WHERE a.id=?", "SELECT p.email, p.full_name FROM patients p JOIN appointments a ON a.patient_id=p.id WHERE a.id=%s"), (appt_id,))
+            pr = c2.fetchone()
+            if pr: send_approval_email(pr[0], pr[1], approved_time, "Botho University Clinic")
+            conn2.close()
+        except Exception as e: print(f"Approve email error: {e}")
+        flash(f"Approved {queue_no}")
     except Exception as e:
-        detail = f"Time {approved_time} - {e}"
-    cur.execute(ph("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?,?)", "INSERT INTO audit VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
-                (str(uuid.uuid4()), "APPROVED", appt_id, appt_id, session["username"], "BOOKED", "APPROVED", now, detail))
-    conn.commit(); conn.close()
-    flash(detail)
-    return redirect(url_for("staff_dashboard"))
+        print(f"Approve failed: {e}"); conn.rollback(); flash(f"Approve failed: {e}")
+    finally: conn.close()
+    return redirect(url_for('staff_dashboard'))
 
 @app.route("/staff/checkin/<appt_id>", methods=["POST"])
 @login_required
-@role_required("reception", "clinician", "manager", "admin")
 def checkin(appt_id):
-    now = datetime.datetime.now().isoformat()
-    conn = get_conn(); cur = conn.cursor()
-    qnum = generate_queue_no(cur)
-    cur.execute(ph("UPDATE appointments SET status='CHECKED_IN', checked_in_at=? WHERE id=?",
-                   "UPDATE appointments SET status='CHECKED_IN', checked_in_at=%s WHERE id=%s"), (now, appt_id))
-    cur.execute(ph("INSERT INTO queue VALUES (?,?,?,?,?,?,?,?)", "INSERT INTO queue VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"),
-                (str(uuid.uuid4()), appt_id, qnum, "WAITING", now, None, None, None))
-    cur.execute(ph("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?,?)", "INSERT INTO audit VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
-                (str(uuid.uuid4()), "CHECKED_IN", appt_id, appt_id, session["username"], "APPROVED", "CHECKED_IN", now, f"Queue {qnum}"))
-    conn.commit(); conn.close()
-    flash(f"Checked in {qnum}")
-    return redirect(url_for("staff_dashboard"))
+    conn = get_conn(); cur = conn.cursor(); now = datetime.datetime.now().isoformat()
+    cur.execute(ph("UPDATE appointments SET status='CHECKED_IN', checked_in_at=? WHERE id=?", "UPDATE appointments SET status='CHECKED_IN', checked_in_at=%s WHERE id=%s"), (now, appt_id))
+    conn.commit(); conn.close(); flash("Checked in"); return redirect(url_for('staff_dashboard'))
 
 @app.route("/staff/call/<appt_id>", methods=["POST"])
 @login_required
-@role_required("reception", "clinician", "manager", "admin")
 def call_patient(appt_id):
-    now = datetime.datetime.now().isoformat()
     conn = get_conn(); cur = conn.cursor()
-    cur.execute(ph("UPDATE appointments SET status='CALLED', called_at=? WHERE id=?",
-                   "UPDATE appointments SET status='CALLED', called_at=%s WHERE id=%s"), (now, appt_id))
-    cur.execute(ph("UPDATE queue SET status='CALLED', called_at=? WHERE appointment_id=?",
-                   "UPDATE queue SET status='CALLED', called_at=%s WHERE appointment_id=%s"), (now, appt_id))
-    # Send email when called
     try:
-        cur.execute(ph("SELECT p.full_name, p.email, q.queue_number, f.name FROM patients p JOIN appointments a ON a.patient_id=p.id JOIN queue q ON q.appointment_id=a.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=?",
-                       "SELECT p.full_name, p.email, q.queue_number, f.name FROM patients p JOIN appointments a ON a.patient_id=p.id JOIN queue q ON q.appointment_id=a.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=%s"), (appt_id,))
-        info = cur.fetchone()
-        if info:
-            pname = info["full_name"] if isinstance(info, dict) else info[0]
-            email = info["email"] if isinstance(info, dict) else info[1]
-            qnum = info["queue_number"] if isinstance(info, dict) else info[2]
-            fname = info["name"] if isinstance(info, dict) else info[3] if len(info)>3 else "Botho University Clinic"
-            if isinstance(info, dict):
-                fname = info.get("name") or "Botho University Clinic"
-            send_call_email(email, pname, qnum, fname)
-    except Exception as e:
-        print(f"Call email error: {e}")
-    conn.commit(); conn.close()
-    flash(f"Called {appt_id} – email sent if exists")
-    return redirect(url_for("staff_dashboard"))
+        now = datetime.datetime.now().isoformat()
+        cur.execute(ph("UPDATE appointments SET status='CALLED', called_at=? WHERE id=?", "UPDATE appointments SET status='CALLED', called_at=%s WHERE id=%s"), (now, appt_id))
+        cur.execute(ph("UPDATE queue SET status='CALLED', called_at=? WHERE appointment_id=?", "UPDATE queue SET status='CALLED', called_at=%s WHERE appointment_id=%s"), (now, appt_id))
+        cur.execute(ph("SELECT q.queue_number, p.email, p.full_name, f.name as facility_name FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=?", "SELECT q.queue_number, p.email, p.full_name, f.name as facility_name FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id WHERE a.id=%s"), (appt_id,))
+        row = cur.fetchone(); conn.commit()
+        if row: send_call_email(row[1], row[2], row[0], row[3] or "Botho University Clinic")
+        flash("Called")
+    except Exception as e: print(f"Call failed: {e}"); conn.rollback(); flash(f"Call failed: {e}")
+    finally: conn.close()
+    return redirect(url_for('staff_dashboard'))
 
 @app.route("/staff/complete/<appt_id>", methods=["POST"])
 @login_required
-@role_required("reception", "clinician", "manager", "admin")
 def complete(appt_id):
-    now = datetime.datetime.now().isoformat()
-    conn = get_conn(); cur = conn.cursor()
-    cur.execute(ph("UPDATE appointments SET status='COMPLETED', completed_at=? WHERE id=?",
-                   "UPDATE appointments SET status='COMPLETED', completed_at=%s WHERE id=%s"), (now, appt_id))
-    cur.execute(ph("UPDATE queue SET status='COMPLETED', completed_at=? WHERE appointment_id=?",
-                   "UPDATE queue SET status='COMPLETED', completed_at=%s WHERE appointment_id=%s"), (now, appt_id))
-    conn.commit(); conn.close()
-    return redirect(url_for("staff_dashboard"))
+    conn = get_conn(); cur = conn.cursor(); now = datetime.datetime.now().isoformat()
+    cur.execute(ph("UPDATE appointments SET status='COMPLETED', completed_at=? WHERE id=?", "UPDATE appointments SET status='COMPLETED', completed_at=%s WHERE id=%s"), (now, appt_id))
+    cur.execute(ph("UPDATE queue SET status='COMPLETED' WHERE appointment_id=?", "UPDATE queue SET status='COMPLETED' WHERE appointment_id=%s"), (appt_id,)); conn.commit(); conn.close(); flash("Completed"); return redirect(url_for('staff_dashboard'))
 
-@app.route("/staff/walkin", methods=["GET", "POST"])
+@app.route("/staff/walkin", methods=["GET","POST"])
 @login_required
-@role_required("reception", "clinician", "manager", "admin")
 def walkin():
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT * FROM facilities"); facilities = cur.fetchall()
     cur.execute("SELECT * FROM services"); services = cur.fetchall()
-    if request.method == "POST":
-        full_name = request.form.get("full_name", "").strip()
-        phone = request.form.get("phone", "").strip()
-        email = request.form.get("email", "").strip()
-        facility_id = request.form.get("facility_id")
-        service_id = request.form.get("service_id")
-        existing_id = None
-        try:
-            cur.execute(ph("SELECT id FROM patients WHERE full_name=? AND phone=? AND email=?",
-                           "SELECT id FROM patients WHERE full_name=%s AND phone=%s AND email=%s"),
-                        (full_name, phone, email))
-            r = cur.fetchone()
-            if r:
-                existing_id = r["id"] if isinstance(r, dict) else r[0]
-        except:
-            pass
-        now = datetime.datetime.now().isoformat()
-        if existing_id:
-            patient_id = existing_id
+    if request.method=="POST":
+        full_name = request.form.get("full_name","").strip(); phone = request.form.get("phone","").strip(); email = request.form.get("email","").strip().lower()
+        facility_id = request.form.get("facility_id"); service_id = request.form.get("service_id")
+        now = datetime.datetime.now().isoformat(); today = datetime.datetime.now().strftime("%Y-%m-%d")
+        cur.execute(ph("SELECT id FROM patients WHERE full_name=? AND phone=? AND email=?", "SELECT id FROM patients WHERE full_name=%s AND phone=%s AND email=%s"), (full_name, phone, email))
+        row = cur.fetchone()
+        if row: patient_id = row[0]
         else:
-            patient_id = generate_ema_code(full_name, cur)
-            cur.execute(ph("INSERT INTO patients VALUES (?,?,?,?,?)",
-                           "INSERT INTO patients VALUES (%s,%s,%s,%s,%s)"), (patient_id, full_name, phone, email, now))
+            cur.execute("SELECT COUNT(*) FROM patients"); count = cur.fetchone()[0]; patient_id = f"E{count+1:02d}DB"
+            cur.execute(ph("INSERT INTO patients VALUES (?,?,?,?,?)", "INSERT INTO patients VALUES (%s,%s,%s,%s,%s)"), (patient_id, full_name, phone, email, now))
         appt_id = str(uuid.uuid4())
-        cur.execute(ph("INSERT INTO appointments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                       "INSERT INTO appointments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"),
-                    (appt_id, patient_id, facility_id, service_id, None, "CHECKED_IN", "WALKIN", now, None, None, None, None, now, None, None, None))
-        qnum = generate_queue_no(cur)
-        cur.execute(ph("INSERT INTO queue VALUES (?,?,?,?,?,?,?,?)",
-                       "INSERT INTO queue VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"),
-                    (str(uuid.uuid4()), appt_id, qnum, "WAITING", now, None, None, None))
-        conn.commit(); conn.close()
-        flash(f"Walk-in {patient_id} {qnum}")
-        return redirect(url_for("staff_dashboard"))
-    conn.close()
-    return render_template("walkin.html", facilities=facilities, services=services)
+        cur.execute(ph("INSERT INTO appointments VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", "INSERT INTO appointments VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (appt_id, patient_id, facility_id, service_id, today, "APPROVED", "WALKIN", now, "Now", now, now, None, None, None, None, None))
+        cur.execute(ph("SELECT COUNT(*) FROM queue WHERE date(created_at)=date('now','localtime')", "SELECT COUNT(*) FROM queue WHERE created_at::date=CURRENT_DATE")); qcount = cur.fetchone()[0]
+        queue_no = f"NO{qcount+1:02d}"; qid = str(uuid.uuid4())
+        cur.execute(ph("INSERT INTO queue VALUES (?,?,?,?,?,?)", "INSERT INTO queue VALUES (%s,%s,%s,%s,%s,%s)"), (qid, appt_id, queue_no, "WAITING", now, None))
+        conn.commit(); conn.close(); flash(f"Walk-in {patient_id} {queue_no}"); return redirect(url_for('staff_dashboard'))
+    conn.close(); return render_template("walkin.html", facilities=facilities, services=services)
 
 @app.route("/staff/reports")
 @login_required
-@role_required("reception", "clinician", "manager", "admin")
 def reports():
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT status, COUNT(*) as c FROM appointments GROUP BY status"); by_status = cur.fetchall()
-    cur.execute("SELECT s.name, COUNT(*) as c FROM appointments a JOIN services s ON a.service_id=s.id GROUP BY s.name"); by_service = cur.fetchall()
-    cur.execute("SELECT * FROM audit ORDER BY timestamp DESC LIMIT 40"); activity = cur.fetchall()
+    cur.execute("SELECT status, COUNT(*) as c FROM appointments GROUP BY status")
+    by_status = cur.fetchall()
+    cur.execute("SELECT s.name, COUNT(*) as c FROM appointments a JOIN services s ON a.service_id=s.id GROUP BY s.name")
+    by_service = cur.fetchall()
     conn.close()
-    return render_template("reports.html", by_status=by_status, by_service=by_service, activity=activity)
+    return render_template("reports.html", by_status=by_status, by_service=by_service)
 
-@app.route("/staff/users", methods=["GET", "POST"])
+@app.route("/staff/users")
 @login_required
-@role_required("admin")
-def manage_users():
+def staff_users():
     conn = get_conn(); cur = conn.cursor()
-    if request.method == "POST":
-        action = request.form.get("action")
-        if action == "add":
-            username = request.form.get("username").strip().lower()
-            password = request.form.get("password")
-            role = request.form.get("role")
-            name = request.form.get("name") or username
-            if username and password and role:
-                from werkzeug.security import generate_password_hash
-                hashed = generate_password_hash(password)
-                cur.execute(ph("INSERT INTO users VALUES (?,?,?,?,?,?,?)",
-                               "INSERT INTO users VALUES (%s,%s,%s,%s,%s,%s,%s)"),
-                            (str(uuid.uuid4()), username, hashed, role, name, 0, None))
-                conn.commit()
-                flash(f"User {username} created")
-    cur.execute("SELECT username, role, name FROM users ORDER BY role, username")
-    users = cur.fetchall()
-    conn.close()
+    cur.execute("SELECT id, username, role, failed_attempts, locked_until FROM users ORDER BY role"); users = cur.fetchall(); conn.close()
     return render_template("staff_users.html", users=users)
 
-@app.route("/staff/logout")
-def staff_logout():
-    session.clear()
-    return redirect(url_for("staff_login"))
+@app.route("/staff/emails", methods=["GET", "POST"])
+@login_required
+def staff_emails():
+    conn = get_conn(); cur = conn.cursor()
+    if request.method=="POST":
+        email = request.form.get("email","").strip().lower(); role = request.form.get("role","reception")
+        if email and "@" in email:
+            try:
+                cur.execute(ph("INSERT INTO staff_notify_emails VALUES (?,?,?,?)", "INSERT INTO staff_notify_emails VALUES (%s,%s,%s,%s)"), (str(uuid.uuid4()), email, role, datetime.datetime.now().isoformat())); conn.commit(); flash(f"Added {email}")
+            except: flash(f"{email} already exists")
+    cur.execute("SELECT * FROM staff_notify_emails ORDER BY created_at DESC"); emails = cur.fetchall(); conn.close()
+    return render_template("staff_emails.html", emails=emails)
 
+@app.route("/staff/emails/delete/<eid>", methods=["POST"])
+@login_required
+def delete_staff_email(eid):
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(ph("DELETE FROM staff_notify_emails WHERE id=?", "DELETE FROM staff_notify_emails WHERE id=%s"), (eid,)); conn.commit(); conn.close(); flash("Removed"); return redirect(url_for('staff_emails'))
+
+init_db()
 if __name__ == "__main__":
-    init_db()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)

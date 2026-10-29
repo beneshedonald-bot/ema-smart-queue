@@ -1,5 +1,12 @@
 {% extends "base_staff.html" %}
 {% block content %}
+{% if session.get('role') != 'admin' %}
+<div class="card p-5 text-center mt-4">
+<h3 class="fw-bold text-danger">🔒 Admin Only</h3>
+<p class="text-muted">Only admin can manage users. You are {{ session.get('role') }}.</p>
+<a href="/staff/dashboard" class="btn btn-dark">Back</a>
+</div>
+{% else %}
 <div class="container py-4">
   <h3 class="fw-bold" style="color:#002a8a">🔐 Staff User Management</h3>
   <p class="small text-muted">Logged in as <b>{{ session.username }}</b> ({{ session.role }}) | Passwords are hashed</p>
@@ -93,4 +100,5 @@
     </div>
   </div>
 </div>
+{% endif %}
 {% endblock %}
