@@ -16,8 +16,8 @@
 {% endif %}
   {% if appt_status not in ['completed', 'cancelled'] %}
 <div class="mt-4 text-center">
-  <form method="POST" action="/cancel/{{ appointment_id }}" onsubmit="return confirm('Cancel your booking? You will need to book again if this was a mistake!')">
-    <button type="submit" class="btn btn-outline-danger rounded-3">❌ Cancel Booking (Mistake/Duplicate)</button>
+  <form method="POST" action="/cancel/{{ appointment_id }}" onsubmit="return confirm">
+    <button type="submit" class="btn btn-outline-danger rounded-3">❌ Cancel Booking </button>
   </form>
   <small class="text-muted">Use this if you made a mistake or double-booked</small>
 </div>
