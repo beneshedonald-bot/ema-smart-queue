@@ -311,6 +311,69 @@ def complete(appt_id):
     cur.execute(ph("UPDATE appointments SET status='COMPLETED', completed_at=? WHERE id=?", "UPDATE appointments SET status='COMPLETED', completed_at=%s WHERE id=%s"), (now, appt_id))
     cur.execute(ph("UPDATE queue SET status='COMPLETED' WHERE appointment_id=?", "UPDATE queue SET status='COMPLETED' WHERE appointment_id=%s"), (appt_id,)); conn.commit(); conn.close(); flash("Completed"); return redirect(url_for('staff_dashboard'))
 
+# ===== DELETE BOOKING – Staff can delete mistakes/duplicates =====
+@app.route('/staff/appointments/delete/<appointment_id>', methods=['POST'])
+def staff_delete_appointment(appointment_id):
+    if 'staff_id' not in session:
+        return redirect(url_for('staff_login'))
+    
+    try:
+        # Get appointment to log
+        appt = fetch_one("SELECT patient_name, email FROM appointments WHERE id = %s", (appointment_id,))
+        # Delete appointment
+        execute_query("DELETE FROM appointments WHERE id = %s", (appointment_id,))
+        print(f"Staff {session.get('staff_username')} deleted appointment {appointment_id} for {appt[0] if appt else 'unknown'}")
+        flash(f"Deleted booking {appointment_id} – duplicate/mistake removed", "success")
+    except Exception as e:
+        print(f"Delete FAILED {appointment_id}: {e}")
+        flash(f"Delete failed: {e}", "danger")
+    
+    return redirect(url_for('staff_dashboard'))
+
+# ===== CANCEL BOOKING – Patient can cancel own booking =====
+@app.route('/cancel/<appointment_id>', methods=['POST'])
+def patient_cancel_appointment(appointment_id):
+    try:
+        # Check appointment exists and is not already completed/cancelled
+        appt = fetch_one("SELECT status, email FROM appointments WHERE id = %s", (appointment_id,))
+        if not appt:
+            flash("Booking not found", "danger")
+            return redirect(url_for('index'))
+        
+        if appt[0] in ['completed', 'cancelled']:
+            flash(f"Cannot cancel – already {appt[0]}", "warning")
+            return redirect(url_for('appointment_status', appointment_id=appointment_id))
+        
+        # Option 1: Delete completely
+        # execute_query("DELETE FROM appointments WHERE id = %s", (appointment_id,))
+        
+        # Option 2: Mark as cancelled (better for audit trail – RECOMMENDED)
+        execute_query("UPDATE appointments SET status = 'cancelled' WHERE id = %s", (appointment_id,))
+        
+        print(f"Patient cancelled appointment {appointment_id}")
+        flash("Your booking has been cancelled", "success")
+        
+        # Send cancellation email via Resend
+        try:
+            to_email = appt[1]
+            subject = f"Booking Cancelled – {appointment_id[:8]}"
+            html = f"""
+            <h3>Your appointment has been cancelled</h3>
+            <p>Appointment ID: {appointment_id}</p>
+            <p>If this was a mistake, please book again at https://emasmarqueue.com/book</p>
+            <p>EMA Smart Queue</p>
+            """
+            send_via_sendgrid(to_email, subject, html)
+        except:
+            pass
+        
+        return redirect(url_for('index'))
+        
+    except Exception as e:
+        print(f"Patient cancel FAILED {appointment_id}: {e}")
+        flash(f"Cancel failed: {e}", "danger")
+        return redirect(url_for('appointment_status', appointment_id=appointment_id))
+
 @app.route("/staff/walkin", methods=["GET","POST"])
 @login_required
 def walkin():
