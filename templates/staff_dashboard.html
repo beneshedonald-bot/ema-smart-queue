@@ -52,6 +52,10 @@ checkNew();
 {% elif a.status=='CHECKED_IN' or a.status=='WAITING' %}<form method="post" action="/staff/call/{{ a.id }}"><button class="btn btn-sm btn-success rounded-3">Call {{ a.queue_number }}</button></form>
 {% elif a.status=='CALLED' %}<form method="post" action="/staff/complete/{{ a.id }}"><button class="btn btn-sm btn-dark rounded-3">Complete</button></form>
 {% else %}Done{% endif %}
+  <!-- Delete button – for mistakes/duplicates -->
+<form method="POST" action="/staff/appointments/delete/{{ appt[0] }}" style="display:inline;" onsubmit="return confirm('Delete this booking? This cannot be undone – for duplicate/mistake only!')">
+  <button type="submit" class="btn btn-sm btn-outline-danger">🗑️ Delete</button>
+</form>
 </td>
 </tr>
 {% endfor %}
