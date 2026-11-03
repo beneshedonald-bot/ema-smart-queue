@@ -14,12 +14,15 @@
 {% else %}
 <p>Not found</p>
 {% endif %}
-  {% if appt_status not in ['completed', 'cancelled'] %}
-<div class="mt-4 text-center">
-  <form method="POST" action="/cancel/{{ appointment_id }}" onsubmit="return confirm">
-    <button type="submit" class="btn btn-outline-danger rounded-3">❌ Cancel Booking </button>
-  </form>
-  <small class="text-muted">Use this if you made a mistake or double-booked</small>
+ {% if appointment_id %}
+<form method="POST" action="/cancel/{{ appointment_id }}" onsubmit="return confirm('Cancel this booking?')">
+  <button type="submit" class="btn btn-outline-danger">❌ Cancel Booking</button>
+</form>
+{% elif appt %}
+<form method="POST" action="/cancel/{{ appt[0] }}" onsubmit="return confirm('Cancel this booking?')">
+  <button type="submit" class="btn btn-outline-danger">❌ Cancel Booking</button>
+</form>
+{% endif %}
 </div>
 {% endif %}
 </div>
