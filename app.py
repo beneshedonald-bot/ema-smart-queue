@@ -1,5 +1,6 @@
 import os, uuid, datetime, threading
 from dotenv import load_dotenv
+import resend
 load_dotenv()
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_mail import Mail, Message
@@ -43,6 +44,33 @@ def send_email_async(app_obj, msg):
             print(f"Email FAILED: {e}")
 
 def send_via_sendgrid(to_emails, subject, body):
+    # ===== NEW: Try Resend FIRST (noreply@emasmarqueue.com) =====
+    resend_key = os.environ.get("RESEND_API_KEY")
+    if resend_key:
+        try:
+            resend.api_key = resend_key
+            from_email = os.environ.get("MAIL_USERNAME", "noreply@emasmarqueue.com")
+            # Format with name for better inbox delivery
+            if "<" not in from_email:
+                from_email = f"EMA Smart Queue <{from_email}>"
+            if isinstance(to_emails, str):
+                to_emails_list = [to_emails]
+            else:
+                to_emails_list = to_emails
+            
+            params = {
+                "from": from_email,
+                "to": to_emails_list,
+                "subject": subject,
+                "html": body,
+            }
+            email = resend.Emails.send(params)
+            print(f"Email OK via Resend to {to_emails} id {email.get('id')}")
+            return True, f"Resend {email.get('id')}"
+        except Exception as e:
+            print(f"Resend FAILED: {e}, trying SendGrid fallback...")
+    
+    # ===== OLD: SendGrid fallback (if Resend fails) =====
     if not SENDGRID_AVAILABLE:
         return False, "SendGrid not installed"
     api_key = os.environ.get("SENDGRID_API_KEY")
@@ -50,22 +78,22 @@ def send_via_sendgrid(to_emails, subject, body):
         return False, "No SENDGRID_API_KEY - using Gmail fallback"
     if isinstance(to_emails, str):
         to_emails = [to_emails]
-    from_email = os.environ.get("MAIL_USERNAME", "emaqms42@gmail.com")
+    from_email = os.environ.get("MAIL_USERNAME", "noreply@emasmarqueue.com")
     message = SGMail(
         from_email=from_email,
         to_emails=to_emails,
         subject=subject,
-        plain_text_content=body
+        html_content=body
     )
     try:
-        sg = SendGridAPIClient(api_key)
+        sg = sendgrid.SendGridAPIClient(api_key)
         response = sg.send(message)
         print(f"Email OK via SendGrid to {to_emails} status {response.status_code}")
         return True, f"SendGrid {response.status_code}"
     except Exception as e:
         print(f"SendGrid FAILED: {e}")
         return False, str(e)
-
+        
 def send_approval_email(to_email, patient_name, approved_time, facility):
     if not to_email or "@" not in str(to_email): return False, "No email"
     subject = f"Appointment APPROVED - {facility}"
