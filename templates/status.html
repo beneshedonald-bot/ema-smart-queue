@@ -1,29 +1,34 @@
-{% extends "base_user.html" %}
+{% extends "base.html" %}
 {% block content %}
-<h3 class="fw-bold">Booking Status</h3>
-<div class="card card-ema p-4 mt-3">
-{% if appt %}
-<p><b>Facility:</b> {{ appt.facility_name or 'Botho University Clinic' }}</p>
-<p><b>Service:</b> {{ appt.service_name or 'General Consultation' }}</p>
-<p><b>Patient:</b> {{ appt.full_name }}</p>
-<p><b>Patient ID:</b> {{ appt.patient_code }}</p>
-<p><b>Status:</b> {{ appt.status }}</p>
-{% if appt.approved_time %}
-<p><b>Approved Time:</b> {{ appt.approved_time }}</p>
-{% endif %}
-{% else %}
-<p>Not found</p>
-{% endif %}
- {% if appointment_id %}
-<form method="POST" action="/cancel/{{ appointment_id }}" onsubmit="return confirm('Cancel this booking?')">
-  <button type="submit" class="btn btn-outline-danger">❌ Cancel Booking</button>
-</form>
-{% elif appt %}
-<form method="POST" action="/cancel/{{ appt[0] }}" onsubmit="return confirm('Cancel this booking?')">
-  <button type="submit" class="btn btn-outline-danger">❌ Cancel Booking</button>
-</form>
-{% endif %}
-</div>
-{% endif %}
+<div class="container mt-5">
+  <div class="card shadow p-4 mx-auto" style="max-width: 600px;">
+    <h3 class="text-center mb-4">Appointment Status</h3>
+    
+    {% if appt %}
+    <p><strong>ID:</strong> {{ appt[0] }}</p>
+    <p><strong>Name:</strong> {{ appt[1] }}</p>
+    <p><strong>Email:</strong> {{ appt[2] }}</p>
+    <p><strong>Status:</strong> <span class="badge bg-primary">{{ appt[5] }}</span></p>
+    <p><strong>Queue Number:</strong> {{ appt[6] if appt|length > 6 else 'N/A' }}</p>
+    
+    <div class="mt-4">
+      <a href="/" class="btn btn-primary w-100 mb-2">Back to Home</a>
+      
+      {% if appt[5] not in ['completed', 'cancelled'] %}
+      <form method="POST" action="/cancel/{{ appt[0] }}" onsubmit="return confirm('Cancel this booking? You will need to book again if this was a mistake!')">
+        <button type="submit" class="btn btn-outline-danger w-100 rounded-3">❌ Cancel Booking (Mistake/Duplicate)</button>
+      </form>
+      <small class="text-muted d-block text-center mt-2">Use if you made a mistake or double-booked</small>
+      {% else %}
+      <div class="alert alert-info mt-3 text-center">This booking is {{ appt[5] }}</div>
+      {% endif %}
+    </div>
+    
+    {% else %}
+    <div class="alert alert-danger">Booking not found – ID: {{ appointment_id }}</div>
+    <a href="/" class="btn btn-primary w-100">Back Home</a>
+    {% endif %}
+    
+  </div>
 </div>
 {% endblock %}
