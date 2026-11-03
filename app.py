@@ -1,14 +1,14 @@
 import os, uuid, datetime, threading
 from dotenv import load_dotenv
-import resend
 load_dotenv()
+import resend
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_mail import Mail, Message
 from werkzeug.security import check_password_hash
 from functools import wraps
 from database.database import get_conn, init_db, ph
 
-# SendGrid for Render live (HTTP API - not blocked)
+# SendGrid for Render live (HTTP API - not blocked) + Resend
 try:
     from sendgrid import SendGridAPIClient
     from sendgrid.helpers.mail import Mail as SGMail
@@ -21,7 +21,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "ema-secret-key-2024")
 app.config['MAIL_SERVER'] = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
 app.config['MAIL_PORT'] = int(os.environ.get("MAIL_PORT", 587))
 app.config['MAIL_USE_TLS'] = True
-app.config['MAIL_USERNAME'] = os.environ.get("MAIL_USERNAME", "emaqms42@gmail.com")
+app.config['MAIL_USERNAME'] = os.environ.get("MAIL_USERNAME", "noreply@emasmarqueue.com")
 app.config['MAIL_PASSWORD'] = os.environ.get("MAIL_PASSWORD", "")
 app.config['MAIL_DEFAULT_SENDER'] = app.config['MAIL_USERNAME']
 mail = Mail(app)
@@ -34,43 +34,35 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-# ========== EMAIL FUNCTIONS (SendGrid + Gmail) ==========
+# ========== EMAIL FUNCTIONS (Resend + SendGrid + Gmail) ==========
 def send_email_async(app_obj, msg):
     with app_obj.app_context():
         try:
             mail.send(msg)
-            print(f"Email OK via Gmail to {msg.recipients}")
+            print(f"Email OK to {msg.recipients}")
         except Exception as e:
             print(f"Email FAILED: {e}")
 
 def send_via_sendgrid(to_emails, subject, body):
-    # ===== NEW: Try Resend FIRST (noreply@emasmarqueue.com) =====
+    # ===== NEW: Try Resend FIRST (noreply@emasmarqueue.com → Inbox) =====
     resend_key = os.environ.get("RESEND_API_KEY")
     if resend_key:
         try:
             resend.api_key = resend_key
             from_email = os.environ.get("MAIL_USERNAME", "noreply@emasmarqueue.com")
-            # Format with name for better inbox delivery
             if "<" not in from_email:
                 from_email = f"EMA Smart Queue <{from_email}>"
             if isinstance(to_emails, str):
-                to_emails_list = [to_emails]
+                to_list = [to_emails]
             else:
-                to_emails_list = to_emails
-            
-            params = {
-                "from": from_email,
-                "to": to_emails_list,
-                "subject": subject,
-                "html": body,
-            }
+                to_list = to_emails
+            params = {"from": from_email, "to": to_list, "subject": subject, "html": body}
             email = resend.Emails.send(params)
             print(f"Email OK via Resend to {to_emails} id {email.get('id')}")
             return True, f"Resend {email.get('id')}"
         except Exception as e:
-            print(f"Resend FAILED: {e}, trying SendGrid fallback...")
+            print(f"Resend FAILED: {e}, trying SendGrid...")
     
-    # ===== OLD: SendGrid fallback (if Resend fails) =====
     if not SENDGRID_AVAILABLE:
         return False, "SendGrid not installed"
     api_key = os.environ.get("SENDGRID_API_KEY")
@@ -86,14 +78,14 @@ def send_via_sendgrid(to_emails, subject, body):
         html_content=body
     )
     try:
-        sg = sendgrid.SendGridAPIClient(api_key)
+        sg = SendGridAPIClient(api_key)
         response = sg.send(message)
         print(f"Email OK via SendGrid to {to_emails} status {response.status_code}")
         return True, f"SendGrid {response.status_code}"
     except Exception as e:
         print(f"SendGrid FAILED: {e}")
         return False, str(e)
-        
+
 def send_approval_email(to_email, patient_name, approved_time, facility):
     if not to_email or "@" not in str(to_email): return False, "No email"
     subject = f"Appointment APPROVED - {facility}"
@@ -128,15 +120,15 @@ def send_staff_new_booking_email(patient_name, patient_id, booked_date, service)
         try:
             cur.execute("SELECT email FROM staff_notify_emails")
             rows = cur.fetchall()
-            staff_emails = [r[0] for r in rows] if rows else ["emaqms42@gmail.com"]
-        except: staff_emails = ["emaqms42@gmail.com"]
+            staff_emails = [r[0] for r in rows] if rows else ["beneshedonald@icloud.com"]
+        except: staff_emails = ["beneshedonald@icloud.com"]
         conn.close()
-        if not staff_emails: staff_emails = ["emaqms42@gmail.com"]
+        if not staff_emails: staff_emails = ["beneshedonald@icloud.com"]
         subject = f"NEW BOOKING – {patient_name} – {patient_id} – {booked_date}"
-        body = f"New patient booked\nPatient: {patient_name}\nID: {patient_id}\nDate: {booked_date}\nService: {service}\nApprove: https://ema-smart-queue.onrender.com/staff/login\n\nEma! Smart Queue\n"
+        body = f"New patient booked\nPatient: {patient_name}\nID: {patient_id}\nDate: {booked_date}\nService: {service}\nApprove: https://emasmarqueue.com/staff/login\n\nEma! Smart Queue\n"
         ok, _ = send_via_sendgrid(staff_emails, subject, body)
         if ok:
-            print(f"Staff notify via SendGrid to {staff_emails}")
+            print(f"Staff notify via Resend/SendGrid to {staff_emails}")
             return True
         msg = Message(subject, recipients=staff_emails)
         msg.body = body
@@ -311,54 +303,6 @@ def complete(appt_id):
     cur.execute(ph("UPDATE appointments SET status='COMPLETED', completed_at=? WHERE id=?", "UPDATE appointments SET status='COMPLETED', completed_at=%s WHERE id=%s"), (now, appt_id))
     cur.execute(ph("UPDATE queue SET status='COMPLETED' WHERE appointment_id=?", "UPDATE queue SET status='COMPLETED' WHERE appointment_id=%s"), (appt_id,)); conn.commit(); conn.close(); flash("Completed"); return redirect(url_for('staff_dashboard'))
 
-# ===== DELETE BOOKING – Staff can delete mistakes/duplicates =====
-@app.route('/staff/appointments/delete/<appointment_id>', methods=['GET', 'POST'])
-def staff_delete_appointment(appointment_id):
-    if 'staff_id' not in session and 'role' not in session:
-        return redirect(url_for('staff_login'))
-    try:
-        conn = get_db_connection() if 'get_db_connection' in globals() else psycopg2.connect(os.environ.get('DATABASE_URL'))
-        cur = conn.cursor()
-        cur.execute("DELETE FROM appointments WHERE id = %s", (appointment_id,))
-        conn.commit()
-        cur.close()
-        conn.close()
-        print(f"Staff deleted appointment {appointment_id}")
-        flash(f"Deleted booking {appointment_id}", "success")
-    except Exception as e:
-        print(f"Delete FAILED {appointment_id}: {e}")
-        flash(f"Delete failed: {e}", "danger")
-    return redirect(url_for('staff_dashboard'))
-
-# ===== CANCEL BOOKING – Patient can cancel own booking =====
-@app.route('/cancel/<appointment_id>', methods=['GET', 'POST'])
-def patient_cancel_appointment(appointment_id):
-    try:
-        conn = get_db_connection() if 'get_db_connection' in globals() else psycopg2.connect(os.environ.get('DATABASE_URL'))
-        cur = conn.cursor()
-        # Check if exists
-        cur.execute("SELECT status FROM appointments WHERE id = %s", (appointment_id,))
-        row = cur.fetchone()
-        if not row:
-            flash("Booking not found", "danger")
-            cur.close()
-            conn.close()
-            return redirect(url_for('index'))
-        
-        # Mark as cancelled (keeps record for audit)
-        cur.execute("UPDATE appointments SET status = 'cancelled' WHERE id = %s", (appointment_id,))
-        conn.commit()
-        cur.close()
-        conn.close()
-        print(f"Patient cancelled {appointment_id}")
-        flash("Your booking cancelled – you can book again if mistake", "success")
-        return redirect(url_for('index'))
-        
-    except Exception as e:
-        print(f"Cancel FAILED {appointment_id}: {e}")
-        flash(f"Cancel failed: {e}", "danger")
-        return redirect(url_for('index'))
-
 @app.route("/staff/walkin", methods=["GET","POST"])
 @login_required
 def walkin():
@@ -420,6 +364,41 @@ def delete_staff_email(eid):
     conn = get_conn(); cur = conn.cursor()
     cur.execute(ph("DELETE FROM staff_notify_emails WHERE id=?", "DELETE FROM staff_notify_emails WHERE id=%s"), (eid,)); conn.commit(); conn.close(); flash("Removed"); return redirect(url_for('staff_emails'))
 
+# ===== DELETE BOOKING – Staff can delete mistakes/duplicates =====
+@app.route('/staff/appointments/delete/<appointment_id>', methods=['GET', 'POST'])
+def staff_delete_appointment(appointment_id):
+    if 'user_id' not in session:
+        return redirect(url_for('staff_login'))
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(ph("DELETE FROM appointments WHERE id=?", "DELETE FROM appointments WHERE id=%s"), (appointment_id,))
+        conn.commit(); conn.close()
+        flash(f"Deleted booking {appointment_id[:8]} – duplicate removed", "success")
+    except Exception as e:
+        print(f"Delete FAILED: {e}")
+        flash(f"Delete failed: {e}", "danger")
+    return redirect(url_for('staff_dashboard'))
+
+# ===== CANCEL BOOKING – Patient can cancel own booking =====
+@app.route('/cancel/<appointment_id>', methods=['GET', 'POST'])
+def patient_cancel_appointment(appointment_id):
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(ph("SELECT status FROM appointments WHERE id=?", "SELECT status FROM appointments WHERE id=%s"), (appointment_id,))
+        row = cur.fetchone()
+        if not row:
+            flash("Booking not found", "danger")
+            conn.close()
+            return redirect(url_for('home_user'))
+        cur.execute(ph("UPDATE appointments SET status='cancelled' WHERE id=?", "UPDATE appointments SET status='cancelled' WHERE id=%s"), (appointment_id,))
+        conn.commit(); conn.close()
+        flash("Your booking cancelled", "success")
+        return redirect(url_for('home_user'))
+    except Exception as e:
+        print(f"Cancel FAILED: {e}")
+        flash(f"Cancel failed: {e}", "danger")
+        return redirect(url_for('home_user'))
+
 init_db()
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",5000)), debug=False)
+    app.run(debug=True)
