@@ -15,7 +15,6 @@ function checkNew(){
       document.getElementById('newAlert').style.display='block';
       document.getElementById('newCount').innerText = d.new_booked;
       document.getElementById('beep').play().catch(()=>{});
-      // Flash title
       let orig = document.title;
       document.title = "🔔 NEW BOOKING! – " + d.new_booked;
       setTimeout(()=>{ document.title = orig; }, 5000);
@@ -25,7 +24,6 @@ function checkNew(){
     }
   }).catch(()=>{});
 }
-// Check every 10 seconds – staff knows instantly, no 50s reload needed
 setInterval(checkNew, 10000);
 checkNew();
 </script>
@@ -52,10 +50,10 @@ checkNew();
 {% elif a.status=='CHECKED_IN' or a.status=='WAITING' %}<form method="post" action="/staff/call/{{ a.id }}"><button class="btn btn-sm btn-success rounded-3">Call {{ a.queue_number }}</button></form>
 {% elif a.status=='CALLED' %}<form method="post" action="/staff/complete/{{ a.id }}"><button class="btn btn-sm btn-dark rounded-3">Complete</button></form>
 {% else %}Done{% endif %}
-  <!-- Delete button – for mistakes/duplicates -->
-<form method="POST" action="/staff/appointments/delete/{{ appt[0] }}" style="display:inline;" onsubmit="return confirm('Delete this booking? This cannot be undone – for duplicate/mistake only!')">
-  <button type="submit" class="btn btn-sm btn-outline-danger">🗑️ Delete</button>
-</form>
+  <!-- Delete button – for mistakes/duplicates – FIXED to use a.id -->
+  <form method="POST" action="/staff/appointments/delete/{{ a.id }}" style="display:inline; margin-left:4px;" onsubmit="return confirm('Delete this booking {{ a.patient_code }} – {{ a.full_name }}? This cannot be undone – for duplicate/mistake only!')">
+    <button type="submit" class="btn btn-sm btn-outline-danger">🗑️</button>
+  </form>
 </td>
 </tr>
 {% endfor %}
