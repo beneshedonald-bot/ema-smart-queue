@@ -11,6 +11,24 @@
 {% if appt.approved_time %}
 <p><b>Approved Time:</b> {{ appt.approved_time }}</p>
 {% endif %}
+{% if queue_no %}
+<p><b>Queue No:</b> <strong>{{ queue_no }}</strong></p>
+{% endif %}
+{% if line %}
+<p><b>Your Line:</b> <strong>{{ line }}</strong></p>
+{% endif %}
+
+<!-- Way 3: Private position - only YOU see this -->
+{% if position and line %}
+<div class="alert alert-info fw-bold text-center rounded-3 mt-3">
+  You are #{{ position }} in {{ line }}.<br>
+  <span class="fw-normal small">{{ position - 1 }} person(s) ahead of you in your line.</span>
+</div>
+{% elif appt.status == 'BOOKED' %}
+<div class="alert alert-warning text-center rounded-3 mt-3">
+  Waiting for nurse to approve. You will get your Line + Queue Number after approval.
+</div>
+{% endif %}
 
 {% if appt.status not in ['completed', 'cancelled', 'canceled'] %}
 <div class="mt-4 text-center">
