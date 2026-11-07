@@ -49,12 +49,12 @@ checkNew();
   {% else %}-{% endif %}
 </td>
 <td>{{ a.status }}</td>
-<td>{% if a.approved_time %}<strong class="text-primary">{{ a.approved_time }}</strong>{% else %}-{% endif %}</td>
+<td>{% if a.approved_time %}<strong class="text-primary">{{ ((a.approved_time.split(':')[0]|int - 1) % 12) + 1 }}:{{ a.approved_time.split(':')[1] }} {{ 'PM' if a.approved_time.split(':')[0]|int >= 12 else 'AM' }}</strong>{% else %}-{% endif %}</td>
 <td>{% if a.queue_number %}<strong>{{ a.queue_number }}</strong>{% else %}-{% endif %}</td>
 <td>
 {% if a.status=='BOOKED' %}
 <form method="post" action="/staff/approve/{{ a.id }}" class="d-flex gap-1"><input type="time" name="approved_time" class="form-control form-control-sm" style="width:95px" required value="09:00"><select name="notify" class="form-select form-select-sm" style="width:70px"><option>Call</option><option>SMS</option></select><button class="btn btn-sm btn-success rounded-3">Approve</button></form>
-{% elif a.status=='APPROVED' %}<form method="post" action="/staff/checkin/{{ a.id }}"><button class="btn btn-sm btn-warning rounded-3">Check-In {{ a.approved_time }}</button></form>
+{% elif a.status=='APPROVED' %}<form method="post" action="/staff/checkin/{{ a.id }}"><button class="btn btn-sm btn-warning rounded-3">Check-In {{ ((a.approved_time.split(':')[0]|int - 1) % 12) + 1 }}:{{ a.approved_time.split(':')[1] }} {{ 'PM' if a.approved_time.split(':')[0]|int >= 12 else 'AM' }}</button></form>
 {% elif a.status=='CHECKED_IN' or a.status=='WAITING' %}<form method="post" action="/staff/call/{{ a.id }}"><button class="btn btn-sm btn-success rounded-3">Call {{ a.queue_number }}</button></form>
 {% elif a.status=='CALLED' %}<form method="post" action="/staff/complete/{{ a.id }}"><button class="btn btn-sm btn-dark rounded-3">Complete</button></form>
 {% else %}Done{% endif %}
