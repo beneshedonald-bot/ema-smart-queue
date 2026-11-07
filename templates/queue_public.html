@@ -1,11 +1,15 @@
 {% extends "base_user.html" %}{% block content %}
 <h3 class="fw-bold">Live Queue</h3>
+<p class="text-muted small">Find your Patient ID. Your line is shown in your approval email / status page.</p>
+
+<!-- LINE 1 - General (2 Nurses) -->
 <div class="card card-ema p-3 mt-3">
+<h5 class="fw-bold mb-2">LINE 1</h5>
 <div class="table-responsive">
 <table class="table small mb-0">
 <thead><tr><th>Queue No</th><th>Patient ID</th><th>Time</th><th>Status</th></tr></thead>
 <tbody>
-{% for q in queue %}
+{% for q in line1 %}
 <tr>
 <td><strong>{{ q.queue_number }}</strong></td>
 <td><span class="badge bg-dark">{{ q.patient_code }}</span></td>
@@ -13,10 +17,34 @@
 <td><span class="badge bg-primary">{{ q.status }}</span></td>
 </tr>
 {% else %}
-<tr><td colspan="4" class="text-center text-muted py-3">No queue today</td></tr>
+<tr><td colspan="4" class="text-center text-muted py-3">No queue in Line 1</td></tr>
 {% endfor %}
 </tbody>
 </table>
 </div>
 </div>
+
+<!-- LINE 2 - Counseling (1 Nurse) -->
+<div class="card card-ema p-3 mt-3">
+<h5 class="fw-bold mb-2">LINE 2</h5>
+<div class="table-responsive">
+<table class="table small mb-0">
+<thead><tr><th>Queue No</th><th>Patient ID</th><th>Time</th><th>Status</th></tr></thead>
+<tbody>
+{% for q in line2 %}
+<tr>
+<td><strong>{{ q.queue_number }}</strong></td>
+<td><span class="badge bg-dark">{{ q.patient_code }}</span></td>
+<td>{{ q.approved_time or '-' }}</td>
+<td><span class="badge bg-primary">{{ q.status }}</span></td>
+</tr>
+{% else %}
+<tr><td colspan="4" class="text-center text-muted py-3">No queue in Line 2</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+
+<p class="text-center text-muted small mt-3">Ema! – Patient Interface | Botho University Clinic</p>
 {% endblock %}
