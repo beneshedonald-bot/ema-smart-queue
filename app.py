@@ -86,10 +86,10 @@ def send_via_sendgrid(to_emails, subject, body):
         print(f"SendGrid FAILED: {e}")
         return False, str(e)
 
-def send_approval_email(to_email, patient_name, approved_time, facility):
+def send_approval_email(to_email, patient_name, approved_time, facility, queue_no="", line=""):
     if not to_email or "@" not in str(to_email): return False, "No email"
-    subject = f"Appointment APPROVED - {facility}"
-    body = f"Hi {patient_name},\n\nYour appointment at {facility} is APPROVED.\nApproved Time: {approved_time}\nFacility: {facility}\nPlease arrive 10 min early.\n\nEma! Smart Queue\n"
+    subject = f"Appointment APPROVED - {facility} - {queue_no} {line}"
+    body = f"Hi {patient_name},\n\nYour appointment at {facility} is APPROVED.\nApproved Time: {approved_time}\n{line} - Queue No: {queue_no}\nFacility: {facility}\nPlease arrive 2 min early.\nCheck your position: https://emasmarqueue.com/status/\n\nEma! Smart Queue\n"
     ok, _ = send_via_sendgrid(to_email, subject, body)
     if ok: return True, "SendGrid"
     try:
@@ -188,16 +188,53 @@ def book():
 def status_view(appt_id):
     conn = get_conn(); cur = conn.cursor()
     cur.execute(ph("SELECT a.*, p.full_name, p.phone, p.email, p.id as patient_code, f.name as facility_name, s.name as service_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id LEFT JOIN services s ON a.service_id=s.id WHERE a.id=?", "SELECT a.*, p.full_name, p.phone, p.email, p.id as patient_code, f.name as facility_name, s.name as service_name FROM appointments a JOIN patients p ON a.patient_id=p.id LEFT JOIN facilities f ON a.facility_id=f.id LEFT JOIN services s ON a.service_id=s.id WHERE a.id=%s"), (appt_id,))
-    appt = cur.fetchone(); conn.close()
-    if not appt: flash("Not found"); return redirect(url_for("home_user"))
-    return render_template("status.html", appt=appt)
+    appt = cur.fetchone()
+    if not appt:
+        conn.close()
+        flash("Not found"); return redirect(url_for("home_user"))
+    # --- Way 2 + 3: Position in YOUR line only ---
+    # appt tuple: 0=id, 3=service_id, 4=preferred_date, 8=approved_time (check your INSERT order)
+    # Get queue_number for this booking
+    cur.execute(ph("SELECT queue_number FROM queue WHERE appointment_id=?", "SELECT queue_number FROM queue WHERE appointment_id=%s"), (appt_id,))
+    qrow = cur.fetchone()
+    queue_no = qrow[0] if qrow else None
+    position = None
+    line = None
+    if queue_no and str(queue_no).startswith("L1"):
+        line = "LINE 1"
+        prefix = "L1-%"
+    elif queue_no and str(queue_no).startswith("L2"):
+        line = "LINE 2"
+        prefix = "L2-%"
+    else:
+        line = None
+        prefix = None
+    if line:
+        # approved_time is appt[8] in your INSERT (approved_time column)
+        try:
+            my_time = appt[8]
+            my_date = appt[4]
+            cur.execute(ph("SELECT COUNT(*) FROM appointments a JOIN queue q ON q.appointment_id=a.id WHERE a.preferred_date=? AND q.queue_number LIKE ? AND a.approved_time IS NOT NULL AND a.approved_time < ? AND a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED')", "SELECT COUNT(*) FROM appointments a JOIN queue q ON q.appointment_id=a.id WHERE a.preferred_date=%s AND q.queue_number LIKE %s AND a.approved_time IS NOT NULL AND a.approved_time < %s AND a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED')"), (my_date, prefix, my_time))
+            ahead = cur.fetchone()[0]
+            position = ahead + 1
+        except Exception as e:
+            print(f"Position calc failed: {e}")
+            position = None
+    conn.close()
+    return render_template("status.html", appt=appt, position=position, line=line, queue_no=queue_no)
 
 @app.route("/queue")
 def queue_public():
     conn = get_conn(); cur = conn.cursor()
-    cur.execute(ph("SELECT q.queue_number, q.status, q.created_at, a.approved_time, p.id as patient_code FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE date(a.preferred_date)=date('now','localtime') AND q.status!='COMPLETED' ORDER BY q.created_at", "SELECT q.queue_number, q.status, q.created_at, a.approved_time, p.id as patient_code FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE a.preferred_date::date=CURRENT_DATE AND q.status!='COMPLETED' ORDER BY q.created_at"))
+    cur.execute(ph("SELECT q.queue_number, q.status, q.created_at, a.approved_time, p.id as patient_code FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE date(a.preferred_date)=date('now','localtime') AND q.status!='COMPLETED' ORDER BY q.queue_number ASC, a.approved_time ASC", "SELECT q.queue_number, q.status, q.created_at, a.approved_time, p.id as patient_code FROM queue q JOIN appointments a ON q.appointment_id=a.id JOIN patients p ON a.patient_id=p.id WHERE a.preferred_date::date=CURRENT_DATE AND q.status!='COMPLETED' ORDER BY q.queue_number ASC, a.approved_time ASC"))
     queue = cur.fetchall(); conn.close()
-    return render_template("queue_public.html", queue=queue)
+    # Split into Line 1 and Line 2 - NO service shown for confidentiality
+    line1 = [r for r in queue if str(r[0]).startswith("L1")]
+    line2 = [r for r in queue if str(r[0]).startswith("L2")]
+    # Old bookings with NOxx (no L prefix) go to Line 1 so they still show
+    old = [r for r in queue if not str(r[0]).startswith("L1") and not str(r[0]).startswith("L2")]
+    line1 = old + line1
+    return render_template("queue_public.html", queue=queue, line1=line1, line2=line2)
 
 @app.route("/staff/login", methods=["GET","POST"])
 def staff_login():
@@ -252,22 +289,60 @@ def approve(appt_id):
     try:
         approved_time = request.form.get("approved_time","09:00")
         cur.execute(ph("SELECT a.*, p.full_name, p.email FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.id=?", "SELECT a.*, p.full_name, p.email FROM appointments a JOIN patients p ON a.patient_id=p.id WHERE a.id=%s"), (appt_id,))
-        if not cur.fetchone(): flash("Not found"); conn.close(); return redirect(url_for('staff_dashboard'))
+        row = cur.fetchone()
+        if not row: flash("Not found"); conn.close(); return redirect(url_for('staff_dashboard'))
+        # row tuple: a.* = 16 cols, then full_name, email. service_id = row[3], preferred_date = row[4]
+        service_id = row[3]
+        preferred_date = row[4]
+        # Get service name
+        cur.execute(ph("SELECT name FROM services WHERE id=?", "SELECT name FROM services WHERE id=%s"), (service_id,))
+        srow = cur.fetchone()
+        service_name = srow[0] if srow else ""
+
+        # --- ASSIGN LINE ---
+        if service_name == "COUNSELING SERVICES":
+            line = "LINE 2"
+            prefix = "L2"
+        elif service_name == "HIV TESTING SERVICES":
+            # HIV -> shorter line wins, all 3 nurses do HIV
+            cur.execute(ph("SELECT COUNT(*) FROM queue q JOIN appointments a ON q.appointment_id=a.id WHERE a.preferred_date=? AND q.queue_number LIKE 'L1-%' AND a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED')", "SELECT COUNT(*) FROM queue q JOIN appointments a ON q.appointment_id=a.id WHERE a.preferred_date=%s AND q.queue_number LIKE 'L1-%%' AND a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED')"), (preferred_date,))
+            l1_count = cur.fetchone()[0]
+            cur.execute(ph("SELECT COUNT(*) FROM queue q JOIN appointments a ON q.appointment_id=a.id WHERE a.preferred_date=? AND q.queue_number LIKE 'L2-%' AND a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED')", "SELECT COUNT(*) FROM queue q JOIN appointments a ON q.appointment_id=a.id WHERE a.preferred_date=%s AND q.queue_number LIKE 'L2-%%' AND a.status IN ('APPROVED','CHECKED_IN','WAITING','CALLED')"), (preferred_date,))
+            l2_count = cur.fetchone()[0]
+            if l2_count < l1_count:
+                line = "LINE 2"; prefix = "L2"
+            else:
+                line = "LINE 1"; prefix = "L1"
+        else:
+            # GENERAL, ART, PREP & PEP, CONTRACEPTIVES, CANCER
+            line = "LINE 1"; prefix = "L1"
+
+        # --- DENY if time goes backwards IN SAME LINE ONLY ---
+        cur.execute(ph("SELECT MAX(a.approved_time) FROM appointments a JOIN queue q ON q.appointment_id=a.id WHERE a.preferred_date=? AND q.queue_number LIKE ? AND a.approved_time IS NOT NULL", "SELECT MAX(a.approved_time) FROM appointments a JOIN queue q ON q.appointment_id=a.id WHERE a.preferred_date=%s AND q.queue_number LIKE %s AND a.approved_time IS NOT NULL"), (preferred_date, f"{prefix}-%"))
+        last_time_row = cur.fetchone()
+        last_time = last_time_row[0] if last_time_row else None
+        if last_time and approved_time and approved_time < last_time:
+            conn.close()
+            flash(f"DENIED! {approved_time} is earlier than last {line} time {last_time}. Pick a time AFTER {last_time} for {line}.")
+            return redirect(url_for('staff_dashboard'))
+
         now = datetime.datetime.now().isoformat()
         cur.execute(ph("UPDATE appointments SET status='APPROVED', approved_time=?, approved_at=? WHERE id=?", "UPDATE appointments SET status='APPROVED', approved_time=%s, approved_at=%s WHERE id=%s"), (approved_time, now, appt_id))
-        cur.execute(ph("SELECT COUNT(*) FROM queue WHERE date(created_at)=date('now','localtime')", "SELECT COUNT(*) FROM queue WHERE created_at::date=CURRENT_DATE")); qcount = cur.fetchone()[0]
-        queue_no = f"NO{qcount+1:02d}"; qid = str(uuid.uuid4())
+        # --- AUTO Queue Number PER LINE ---
+        cur.execute(ph("SELECT COUNT(*) FROM queue q JOIN appointments a ON q.appointment_id=a.id WHERE a.preferred_date=? AND q.queue_number LIKE ?", "SELECT COUNT(*) FROM queue q JOIN appointments a ON q.appointment_id=a.id WHERE a.preferred_date=%s AND q.queue_number LIKE %s"), (preferred_date, f"{prefix}-%"))
+        qcount_in_line = cur.fetchone()[0]
+        queue_no = f"{prefix}-NO{qcount_in_line+1:02d}"; qid = str(uuid.uuid4())
         cur.execute(ph("INSERT INTO queue VALUES (?,?,?,?,?,?)", "INSERT INTO queue VALUES (%s,%s,%s,%s,%s,%s)"), (qid, appt_id, queue_no, "WAITING", now, None))
-        cur.execute(ph("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?,?)", "INSERT INTO audit VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (str(uuid.uuid4()), "APPROVE", appt_id, queue_no, session.get('username'), "BOOKED", "APPROVED", now, f"Approved {approved_time}"))
+        cur.execute(ph("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?,?)", "INSERT INTO audit VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"), (str(uuid.uuid4()), "APPROVE", appt_id, queue_no, session.get('username'), "BOOKED", "APPROVED", now, f"Approved {approved_time} {line}"))
         conn.commit()
         try:
             conn2 = get_conn(); c2 = conn2.cursor()
             c2.execute(ph("SELECT p.email, p.full_name FROM patients p JOIN appointments a ON a.patient_id=p.id WHERE a.id=?", "SELECT p.email, p.full_name FROM patients p JOIN appointments a ON a.patient_id=p.id WHERE a.id=%s"), (appt_id,))
             pr = c2.fetchone()
-            if pr: send_approval_email(pr[0], pr[1], approved_time, "Botho University Clinic")
+            if pr: send_approval_email(pr[0], pr[1], approved_time, "Botho University Clinic", queue_no, line)
             conn2.close()
         except Exception as e: print(f"Approve email error: {e}")
-        flash(f"Approved {queue_no}")
+        flash(f"Approved {line} - {queue_no} at {approved_time}")
     except Exception as e:
         print(f"Approve failed: {e}"); conn.rollback(); flash(f"Approve failed: {e}")
     finally: conn.close()
