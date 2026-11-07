@@ -37,12 +37,11 @@ def init_db():
                     (str(uuid.uuid4()), "emaqms42@gmail.com", "admin", datetime.datetime.now().isoformat()))
 
     cur.execute("CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
-    cur.execute("SELECT COUNT(*) FROM services")
-    if cur.fetchone()[0]==0:
-        cur.execute(ph("INSERT INTO services VALUES (?,?)",
-                       "INSERT INTO services VALUES (%s,%s)"),
-                    (str(uuid.uuid4()), "General Consultation"))
-
+        cur.execute("SELECT COUNT(*) FROM services")
+    for _name in ["GENERAL CONSULTATIONS", "COUNSELING SERVICES", "ART", "PREP & PEP", "CONTRACEPTIVES (FP)", "HIV TESTING SERVICES", "CANCER SCREENING"]:
+        cur.execute(ph("SELECT COUNT(*) FROM services WHERE name=?", "SELECT COUNT(*) FROM services WHERE name=%s"), (_name,))
+        if cur.fetchone()[0] == 0:
+            cur.execute(ph("INSERT INTO services VALUES (?,?)", "INSERT INTO services VALUES (%s,%s)"), (str(uuid.uuid4()), _name))
     cur.execute("CREATE TABLE IF NOT EXISTS facilities (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
     cur.execute("SELECT COUNT(*) FROM facilities")
     if cur.fetchone()[0]==0:
