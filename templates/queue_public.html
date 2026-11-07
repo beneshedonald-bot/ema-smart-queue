@@ -12,7 +12,7 @@
 <tr>
 <td><strong>{{ q.queue_number }}</strong></td>
 <td><span class="badge bg-dark">{{ q.patient_code }}</span></td>
-<td>{{ q.approved_time or '-' }}</td>
+<td>{{ ((q.approved_time.split(':')[0]|int - 1) % 12) + 1 }}:{{ q.approved_time.split(':')[1] }} {{ 'PM' if q.approved_time.split(':')[0]|int >= 12 else 'AM' }}</td>
 <td><span class="badge bg-primary">{{ q.status }}</span></td>
 </tr>
 {% else %}
@@ -34,7 +34,7 @@
 <tr>
 <td><strong>{{ q.queue_number }}</strong></td>
 <td><span class="badge bg-dark">{{ q.patient_code }}</span></td>
-<td>{{ q.approved_time or '-' }}</td>
+<td>{{ ((q.approved_time.split(':')[0]|int - 1) % 12) + 1 }}:{{ q.approved_time.split(':')[1] }} {{ 'PM' if q.approved_time.split(':')[0]|int >= 12 else 'AM' }}</td>
 <td><span class="badge bg-primary">{{ q.status }}</span></td>
 </tr>
 {% else %}
