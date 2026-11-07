@@ -29,30 +29,39 @@ checkNew();
 </script>
 
 <h2 class="fw-bold mb-1">Appointments</h2>
-<p class="text-muted small mb-3">Botho University Clinic – Today</p>
+<p class="text-muted small mb-3">Botho University Clinic – Today | LINE 1 = General (2 Nurses) | LINE 2 = Counseling (1 Nurse) | HIV auto-balances to shorter line</p>
 
 <div class="card card-ema p-3">
 <div class="d-flex justify-content-between align-items-center mb-3"><h5 class="fw-bold mb-0">Appointments</h5><a href="/staff/walkin" class="btn btn-outline-dark btn-sm rounded-3">New</a></div>
-<div class="table-responsive"><table class="table align-middle small"><thead class="table-light"><tr><th>PATIENT ID</th><th>PATIENT NAME</th><th>BOOKED DATE</th><th>SERVICE</th><th>STATUS</th><th>APPROVED TIME</th><th>QUEUE</th><th>ACTIONS</th></tr></thead><tbody>
+<div class="table-responsive"><table class="table align-middle small"><thead class="table-light"><tr><th>PATIENT ID</th><th>PATIENT NAME</th><th>BOOKED DATE</th><th>SERVICE</th><th>LINE</th><th>STATUS</th><th>APPROVED TIME</th><th>QUEUE</th><th>ACTIONS</th></tr></thead><tbody>
 {% for a in appointments %}
 <tr>
 <td><span class="badge bg-dark rounded-pill">{{ a.patient_code }}</span></td>
 <td>{{ a.full_name }}</td>
 <td><span class="badge bg-light text-dark border">{{ a.preferred_time or (a.created_at[:10] if a.created_at else '-') }}</span></td>
 <td>{{ a.service_name or 'General' }}</td>
+<td>
+  {% if a.queue_number and a.queue_number.startswith('L1') %}<span class="badge bg-success">LINE 1</span>
+  {% elif a.queue_number and a.queue_number.startswith('L2') %}<span class="badge bg-warning text-dark">LINE 2</span>
+  {% elif a.service_name == 'COUNSELING SERVICES' %}<span class="badge bg-warning text-dark">LINE 2*</span>
+  {% elif a.service_name == 'HIV TESTING SERVICES' %}<span class="badge bg-info text-dark">HIV → Auto</span>
+  {% elif a.service_name %}<span class="badge bg-success">LINE 1*</span>
+  {% else %}-{% endif %}
+</td>
 <td>{{ a.status }}</td>
 <td>{% if a.approved_time %}<strong class="text-primary">{{ a.approved_time }}</strong>{% else %}-{% endif %}</td>
 <td>{% if a.queue_number %}<strong>{{ a.queue_number }}</strong>{% else %}-{% endif %}</td>
 <td>
 {% if a.status=='BOOKED' %}
 <form method="post" action="/staff/approve/{{ a.id }}" class="d-flex gap-1"><input type="time" name="approved_time" class="form-control form-control-sm" style="width:95px" required value="09:00"><select name="notify" class="form-select form-select-sm" style="width:70px"><option>Call</option><option>SMS</option></select><button class="btn btn-sm btn-success rounded-3">Approve</button></form>
+<small class="text-muted d-block">System auto-assigns Line + Queue No. Must be AFTER last time in same Line.</small>
 {% elif a.status=='APPROVED' %}<form method="post" action="/staff/checkin/{{ a.id }}"><button class="btn btn-sm btn-warning rounded-3">Check-In {{ a.approved_time }}</button></form>
 {% elif a.status=='CHECKED_IN' or a.status=='WAITING' %}<form method="post" action="/staff/call/{{ a.id }}"><button class="btn btn-sm btn-success rounded-3">Call {{ a.queue_number }}</button></form>
 {% elif a.status=='CALLED' %}<form method="post" action="/staff/complete/{{ a.id }}"><button class="btn btn-sm btn-dark rounded-3">Complete</button></form>
 {% else %}Done{% endif %}
   <!-- Delete button – for mistakes/duplicates – FIXED to use a.id -->
   <form method="POST" action="/staff/appointments/delete/{{ a.id }}" style="display:inline; margin-left:4px;" onsubmit="return confirm('Delete this booking {{ a.patient_code }} – {{ a.full_name }}? This cannot be undone – for duplicate/mistake only!')">
-    <button type="submit" class="btn btn-sm btn-outline-danger">🗑️</button>
+    <button type="submit" class="btn btn-sm btn-outline-danger">🗑</button>
   </form>
 </td>
 </tr>
