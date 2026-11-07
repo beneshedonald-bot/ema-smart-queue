@@ -37,7 +37,7 @@ def init_db():
                     (str(uuid.uuid4()), "emaqms42@gmail.com", "admin", datetime.datetime.now().isoformat()))
 
     cur.execute("CREATE TABLE IF NOT EXISTS services (id TEXT PRIMARY KEY, name TEXT NOT NULL)")
-        cur.execute("SELECT COUNT(*) FROM services")
+    cur.execute("SELECT COUNT(*) FROM services")
     for _name in ["GENERAL CONSULTATIONS", "COUNSELING SERVICES", "ART", "PREP & PEP", "CONTRACEPTIVES (FP)", "HIV TESTING SERVICES", "CANCER SCREENING"]:
         cur.execute(ph("SELECT COUNT(*) FROM services WHERE name=?", "SELECT COUNT(*) FROM services WHERE name=%s"), (_name,))
         if cur.fetchone()[0] == 0:
