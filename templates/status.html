@@ -9,7 +9,7 @@
 <p><b>Patient ID:</b> {{ appt.patient_code }}</p>
 <p><b>Status:</b> {{ appt.status }}</p>
 {% if appt.approved_time %}
-<p><b>Approved Time:</b> {{ appt.approved_time }}</p>
+<p><b>Approved Time:</b> {{ ((appt.approved_time.split(':')[0]|int - 1) % 12) + 1 }}:{{ appt.approved_time.split(':')[1] }} {{ 'PM' if appt.approved_time.split(':')[0]|int >= 12 else 'AM' }}</p>
 {% endif %}
 {% if queue_no %}
 <p><b>Queue No:</b> <strong>{{ queue_no }}</strong></p>
