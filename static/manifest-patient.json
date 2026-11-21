@@ -1,0 +1,21 @@
+{
+  "name": "Ema! Queue - Botho University Clinic",
+  "short_name": "Ema! Queue",
+  "description": "Botho University Clinic Smart Queue - Book and check your queue",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0d4aa5",
+  "icons": [
+    {
+      "src": "/static/icons/patient-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/patient-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
