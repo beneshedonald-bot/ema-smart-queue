@@ -1,0 +1,21 @@
+{
+  "name": "Ema! Staff - Botho University Clinic",
+  "short_name": "Ema! Staff",
+  "description": "Botho University Clinic Staff Dashboard",
+  "start_url": "/staff/login",
+  "display": "standalone",
+  "background_color": "#0d2a6e",
+  "theme_color": "#0d2a6e",
+  "icons": [
+    {
+      "src": "/static/icons/staff-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/staff-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
