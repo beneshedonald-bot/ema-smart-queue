@@ -34,4 +34,9 @@ body{background:#f1f3f6;min-height:100vh;font-family:Inter,system-ui}
 </div></nav>
 <div class="container-fluid px-4 mt-4">{% block content %}{% endblock %}</div>
 <footer class="text-center mt-5 mb-3 small text-muted">Ema! – Staff Interface</footer>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js');
+}
+</script>
 </body></html>
