@@ -26,4 +26,9 @@ body{background:linear-gradient(180deg,#eaf2ff 0%,#f8fbff 60%,#fff 100%);min-hei
 </div></nav>
 <div class="container mt-5">{% block content %}{% endblock %}</div>
 <footer class="text-center mt-5 mb-3 small text-muted">Ema! – Patient Interface | Botho University Clinic</footer>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js');
+}
+</script>
 </body></html>
